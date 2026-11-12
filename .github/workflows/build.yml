@@ -7,7 +7,8 @@
 #           (scripts/ami.sh), then the end-to-end boot test (scripts/boot-test.sh), one arch at a time (they share
 #           the test subnet's route table)
 #   release on v* tags, once both AMIs pass: the GitHub release
-# Repo variables: AWS_ROLE_ARN (GitHub OIDC role), AWS_REGION, NATKIT_BUCKET, NATKIT_TEST_PUBLIC_SUBNET,
+# Repo secret: AWS_ROLE_ARN (GitHub OIDC role; a secret so the account ID stays out of the public logs).
+# Repo variables: AWS_REGION, NATKIT_BUCKET, NATKIT_TEST_PUBLIC_SUBNET,
 # NATKIT_TEST_PRIVATE_SUBNET, NATKIT_TEST_INSTANCE_PROFILE.
 name: build
 
@@ -197,7 +198,8 @@ jobs:
           path: out
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          mask-aws-account-id: true
           aws-region: ${{ vars.AWS_REGION }}
       - id: ami
         run: |
@@ -225,7 +227,8 @@ jobs:
     steps:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          mask-aws-account-id: true
           aws-region: ${{ vars.AWS_REGION }}
       - run: |
           tag="Name=tag:natkit.io/boot-test,Values=run-${{ github.run_id }}-arm64,run-${{ github.run_id }}-amd64"
@@ -264,7 +267,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          mask-aws-account-id: true
           aws-region: ${{ vars.AWS_REGION }}
       - run: |
           version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)

@@ -123,11 +123,12 @@ make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vm
 `.github/workflows/build.yml` builds both architectures on every push. Tags (`v*`) and manual runs also register
 the AMIs and run `scripts/boot-test.sh`: an EIP, a static ENI, a client in a private subnet whose egress must be the
 EIP, a failover to a second instance, CloudWatch agent metrics, and NAT64 when the test subnets have IPv6.
-`tofu/ci` creates the role, test VPC and instance profile and outputs these repository variables:
+`tofu/ci` creates the role, test VPC and instance profile and outputs these repository variables (set `AWS_ROLE_ARN` as a secret
+instead: it holds the account ID, and the run logs are public):
 
 | Variable | |
 |---|---|
-| `AWS_ROLE_ARN` | GitHub OIDC role: S3 + `ec2:ImportSnapshot`/`RegisterImage` (as yagan), and for the boot test EC2 instances, EIPs, ENIs, routes, `ssm:PutParameter`/`DeleteParameter` under `/natkit/boot-test/`, `iam:PassRole` for the test profile, `cloudwatch:GetMetricStatistics` |
+| `AWS_ROLE_ARN` (secret) | GitHub OIDC role: S3 + `ec2:ImportSnapshot`/`RegisterImage` (as yagan), and for the boot test EC2 instances, EIPs, ENIs, routes, `ssm:PutParameter`/`DeleteParameter` under `/natkit/boot-test/`, `iam:PassRole` for the test profile, `cloudwatch:GetMetricStatistics` |
 | `AWS_REGION` | the region for everything |
 | `NATKIT_BUCKET` | S3 bucket for image imports |
 | `NATKIT_TEST_PUBLIC_SUBNET` | subnet with an internet gateway route |

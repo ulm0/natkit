@@ -3,7 +3,11 @@
 # NAT instances' test profile. `tofu output repo_variables` lists the repository variables to set.
 # Not created here: the account's GitHub OIDC provider, the S3 import bucket and the vmimport role (reuse yagan's).
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.10"
+  # bucket, key and region come from `init -backend-config=backend.tfvars` (gitignored)
+  backend "s3" {
+    use_lockfile = true
+  }
   required_providers {
     aws = { source = "hashicorp/aws", version = ">= 6.0" }
   }
@@ -176,7 +180,7 @@ resource "aws_iam_role_policy" "github" {
 }
 
 output "repo_variables" {
-  description = "Set these as GitHub repository variables (gh variable set NAME -b VALUE -R <owner>/natkit)."
+  description = "Set these as GitHub repository variables (gh variable set NAME -b VALUE -R <owner>/natkit); AWS_ROLE_ARN as a secret (gh secret set)."
   value = {
     AWS_ROLE_ARN                 = aws_iam_role.github.arn
     AWS_REGION                   = local.region
