@@ -74,6 +74,13 @@ services:
       - /run/containerd/containerd.sock:/run/containerd/containerd.sock
       - /run/natkit:/run/natkit:ro
       - /usr/bin/ctr:/usr/bin/ctr:ro
+      - /etc/resolv.conf:/etc/resolv.conf # ctr resolves public.ecr.aws itself when it pulls
+    devices: # its progress and failures go on the serial console, as natkit-init's do
+      - path: /dev/console
+        type: c
+        major: 5
+        minor: 1
+        mode: "0600"
     command: ["/usr/bin/natkit-cwagent"]
 files:
   - path: etc/linuxkit.yml

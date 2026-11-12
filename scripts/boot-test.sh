@@ -27,8 +27,9 @@ AMI=$1 ARCH=$2
 TAG=${NATKIT_BOOT_TEST_TAG:-$AMI}
 PUB=${NATKIT_TEST_PUBLIC_SUBNET:?} PRIV=${NATKIT_TEST_PRIVATE_SUBNET:?} PROFILE=${NATKIT_TEST_INSTANCE_PROFILE:?}
 case $ARCH in
-arm64) TYPE=t4g.nano CTYPE=t4g.micro ;;
-amd64) TYPE=t3.nano CTYPE=t3.micro ;;
+# micro, not nano, for the NAT instances: the CloudWatch agent (README) needs the memory
+arm64) TYPE=t4g.micro CTYPE=t4g.micro ;;
+amd64) TYPE=t3.micro CTYPE=t3.micro ;;
 *) echo "arch must be arm64 or amd64" >&2 && exit 1 ;;
 esac
 PARAM=/natkit/boot-test/$TAG/cwagent
@@ -181,5 +182,5 @@ for _ in $(seq 40); do
 	[ "$c" -gt 0 ] && echo "B: CloudWatch agent published $c datapoint(s)" && break
 	c=0
 done
-[ "$c" -gt 0 ] || die "B: no CloudWatch agent metrics after 10 min"
+[ "$c" -gt 0 ] || { console "$b" | tr -d '\r' | grep -a 'natkit-cwagent' | tail -n 5 >&2; die "B: no CloudWatch agent metrics after 10 min"; }
 echo "boot test: ok" >&2
