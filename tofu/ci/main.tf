@@ -9,7 +9,7 @@ terraform {
     use_lockfile = true
   }
   required_providers {
-    aws = { source = "hashicorp/aws", version = ">= 6.0" }
+    aws = { source = "hashicorp/aws", version = ">= 6.28" }
   }
 }
 
@@ -49,54 +49,29 @@ locals {
   ec2_arn = "${local.arn}:ec2:${local.region}:${local.account}"
 }
 
-# ---- test network
-resource "aws_vpc" "test" {
-  cidr_block                       = var.cidr
-  assign_generated_ipv6_cidr_block = true
-  enable_dns_support               = true
-  tags                             = local.tags
-}
-resource "aws_internet_gateway" "test" {
-  vpc_id = aws_vpc.test.id
-  tags   = local.tags
-}
-resource "aws_subnet" "public" {
-  vpc_id            = aws_vpc.test.id
-  availability_zone = data.aws_availability_zones.available.names[0]
-  cidr_block        = cidrsubnet(var.cidr, 2, 0)
-  ipv6_cidr_block   = cidrsubnet(aws_vpc.test.ipv6_cidr_block, 8, 0)
-  tags              = { Name = "${var.name}-public" }
-}
-resource "aws_subnet" "private" {
-  vpc_id            = aws_vpc.test.id
-  availability_zone = data.aws_availability_zones.available.names[0]
-  cidr_block        = cidrsubnet(var.cidr, 2, 1)
-  ipv6_cidr_block   = cidrsubnet(aws_vpc.test.ipv6_cidr_block, 8, 1)
-  tags              = { Name = "${var.name}-private" }
-}
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.test.id
-  tags   = { Name = "${var.name}-public" }
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.test.id
-  }
-}
-# no routes: the boot test adds 0.0.0.0/0 and 64:ff9b::/96 -> its ENI, and removes them
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.test.id
-  tags   = { Name = "${var.name}-private" }
-  lifecycle {
-    ignore_changes = [route]
-  }
-}
-resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.public.id
-}
-resource "aws_route_table_association" "private" {
-  subnet_id      = aws_subnet.private.id
-  route_table_id = aws_route_table.private.id
+# ---- test network: a public subnet and a private one with its own route table, IPv4 + IPv6, one AZ
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "6.7.3"
+
+  name            = var.name
+  cidr            = var.cidr
+  azs             = [data.aws_availability_zones.available.names[0]]
+  public_subnets  = [cidrsubnet(var.cidr, 2, 0)]
+  private_subnets = [cidrsubnet(var.cidr, 2, 1)]
+
+  enable_ipv6                  = true
+  public_subnet_ipv6_prefixes  = [0]
+  private_subnet_ipv6_prefixes = [1]
+
+  # the private route table stays empty: boot-test.sh adds 0.0.0.0/0 and 64:ff9b::/96 -> its ENI and removes them, and
+  # any other egress (NAT gateway, egress-only IGW) would let the client's checks pass without natkit
+  enable_nat_gateway     = false
+  create_egress_only_igw = false
+  # the test instances launch in the default security group, which must keep its allow-within-group rules
+  manage_default_security_group = false
+
+  tags = local.tags
 }
 
 # ---- the test NAT instances' role (they get EIPs and ENIs the test creates, so no resource scoping here)
@@ -188,8 +163,8 @@ output "repo_variables" {
     AWS_ROLE_ARN                 = aws_iam_role.github.arn
     AWS_REGION                   = local.region
     NATKIT_BUCKET                = var.bucket
-    NATKIT_TEST_PUBLIC_SUBNET    = aws_subnet.public.id
-    NATKIT_TEST_PRIVATE_SUBNET   = aws_subnet.private.id
+    NATKIT_TEST_PUBLIC_SUBNET    = module.vpc.public_subnets[0]
+    NATKIT_TEST_PRIVATE_SUBNET   = module.vpc.private_subnets[0]
     NATKIT_TEST_INSTANCE_PROFILE = aws_iam_instance_profile.nat.name
   }
 }
