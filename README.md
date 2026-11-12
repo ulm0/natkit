@@ -24,10 +24,11 @@ IMDSv2 is required by the AMI.
 User-data (every key optional; none at all is a plain NAT out of the primary ENI):
 
 ```yaml
-eip_id: eipalloc-0123                 # associate this EIP with the primary ENI
+eip_id: eipalloc-0123                 # associate this EIP with the primary ENI (after eni_id's ENI is attached)
 eni_id: eni-0123                      # HA: attach this static ENI (the route tables' target) as device 1,
                                       #   turn off the primary ENI's source/dest check
 interface: eth0                       # public interface, if not the primary ENI's (ignored with eni_id)
+nat64: false                          # no NAT64 (default: on)
 ip_local_port_range: "1024 65535"     # tuning, applied only when set
 nf_conntrack_max: 262144
 nf_conntrack_buckets: 65536
@@ -48,10 +49,27 @@ natkit: FAIL <reason>
 ```
 
 For HA, run it in an Auto Scaling group of one with `eni_id` and `eip_id`. A replacement keeps retrying the ENI
-attachment for up to 15 minutes while the old instance still holds it.
+attachment for up to 15 minutes while the old instance still holds it, and takes the EIP only once it has the ENI
+(fck-nat takes the EIP first, which moves egress off the EIP while the old instance is still routing).
 
-NAT64 is always on: Jool translates `64:ff9b::/96` (pair it with Route 53 Resolver DNS64 on IPv6 subnets and a
-`64:ff9b::/96` route to the instance).
+NAT64 is on unless `nat64: false`: Jool translates `64:ff9b::/96` (pair it with Route 53 Resolver DNS64 on IPv6
+subnets and a `64:ff9b::/96` route to the instance, whose ENI needs an IPv6 address). Jool's default IPv4 pool is
+ports 61001-65535 of the instance's address: keep `ip_local_port_range` below that.
+
+### OpenTofu
+
+`tofu/nat` is that HA setup as a module (ASG of one, static ENI, EIP, routes, a scoped instance role):
+
+```hcl
+module "nat" {
+  source          = "github.com/ulm0/natkit//tofu/nat"
+  vpc_id          = aws_vpc.main.id
+  subnet_id       = aws_subnet.public.id
+  route_table_ids = [aws_route_table.private.id]
+  ami_id          = "ami-..." # natkit-<version>-arm64
+  settings        = { nf_conntrack_max = "262144" }
+}
+```
 
 ### Instance role
 
@@ -79,7 +97,9 @@ in memory: use at least a `t4g.micro`/`t3.micro` with it.
 - No SSH, SSM agent or package manager; the only login is the EC2 Serial Console, locked unless `console_password`
   is set.
 - The instance accepts no new inbound connections to itself (nftables input policy drop: replies, ICMP and DHCP
-  only). Forwarded traffic is not filtered: use the security group.
+  only). Forwarded traffic is not filtered (use the security group), except packets conntrack calls invalid, which
+  would otherwise leave un-NATed.
+- AWS credentials reach `curl` on stdin, never on a command line.
 - Kernel: built from `allnoconfig` (no USB, wireless, filesystems beyond tmpfs/overlay, `/dev/mem`, kexec or 32-bit
   syscalls), CPU mitigations, KASLR, stack protector, hardened usercopy, zeroed allocations. Module loading is
   disabled once Jool is in.
@@ -102,7 +122,8 @@ make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vm
 
 `.github/workflows/build.yml` builds both architectures on every push. Tags (`v*`) and manual runs also register
 the AMIs and run `scripts/boot-test.sh`: an EIP, a static ENI, a client in a private subnet whose egress must be the
-EIP, a failover to a second instance, and CloudWatch agent metrics. Repository variables:
+EIP, a failover to a second instance, CloudWatch agent metrics, and NAT64 when the test subnets have IPv6.
+`tofu/ci` creates the role, test VPC and instance profile and outputs these repository variables:
 
 | Variable | |
 |---|---|

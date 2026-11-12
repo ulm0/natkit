@@ -5,3 +5,7 @@ kernel/.build/
 kernel/config-*
 test/.user-data.yaml
 .DS_Store
+.terraform/
+*.tfstate*
+.terraform.lock.hcl
+*.tfvars

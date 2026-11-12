@@ -6,22 +6,22 @@ kernel:
   # port. EBS volumes must never time out (AWS's recommended nvme_core.io_timeout).
   cmdline: "console=ttyS0,115200n8 earlycon nvme_core.io_timeout=4294967295"
 init:
-  - linuxkit/init:1c3e4933ceabd7418b961d66d5d884bf0044ac64
-  - linuxkit/runc:9442aa234715e751a16144f1d4ae3fd1a00fd492
-  - linuxkit/containerd:eb5daf20704109ea58abb38d2b808e0c3a7e3717
-  - linuxkit/ca-certificates:256f1950df59f2f209e9f0b81374177409eb11de
+  - linuxkit/init:1c3e4933ceabd7418b961d66d5d884bf0044ac64@sha256:46899610b7f12e7a63cf1da2b71b71e9242b4d68daee26542c31a9756ff2dd84
+  - linuxkit/runc:9442aa234715e751a16144f1d4ae3fd1a00fd492@sha256:a24c4eb57ca4c0f70e7f6a4da06ab18f26b276b152e22af4365f2ec50a1387bd
+  - linuxkit/containerd:eb5daf20704109ea58abb38d2b808e0c3a7e3717@sha256:0ca01ddea892841fee3817632ec7e67c79892bb049a4db9d1b2a9a472b6b91ba
+  - linuxkit/ca-certificates:256f1950df59f2f209e9f0b81374177409eb11de@sha256:676ef8c72066e5f58ebcc69c46d3fea7ee681c8659ed383dfcbc9c617a5d0f4f
   # service and onboot output to an in-memory ring (no disk to write logs to). From the getty:
   # /proc/1/root/usr/bin/logread -F
-  - linuxkit/memlogd:19b0fdec83dded95e0a2f97a8ca6868f5e83c401
+  - linuxkit/memlogd:19b0fdec83dded95e0a2f97a8ca6868f5e83c401@sha256:c472c63a2164b7cc334199c4e38d58c4f3b574a3ffe3cc314bfead96b8688505
   # Jool's NAT64 modules for this kernel, at /lib/modules/<release>/extra (kernel/jool.sh; same tag as the kernel)
   - ghcr.io/ulm0/natkit/jool:6.18.62
 onboot:
   - name: sysctl # linuxkit's defaults + etc/natkit/sysctl.conf (forwarding); user-data tuning is natkit-init's
-    image: linuxkit/sysctl:43ac1d39da329c3567fcb9689e5ca99de6d169b6
+    image: linuxkit/sysctl:43ac1d39da329c3567fcb9689e5ca99de6d169b6@sha256:3e8668296e4b51859ef025f9ca8486c1ea99059c9d42f6bea7567b1d0445c145
     binds.add:
       - /etc/natkit/sysctl.conf:/etc/sysctl.d/90-natkit.conf
   - name: dhcpcd
-    image: linuxkit/dhcpcd:b87e9ececac55a65eaa592f4dd8b4e0c3009afdb
+    image: linuxkit/dhcpcd:b87e9ececac55a65eaa592f4dd8b4e0c3009afdb@sha256:c58b85778641b3d153f4094a9ae7aea62829fc0f84126fb15a2bb26041861ada
     command: ["/sbin/dhcpcd", "--nobackground", "-f", "/dhcpcd.conf", "-1"]
   # IMDSv2 user-data -> EIP, static ENI, nftables masquerade, tuning, NAT64, CloudWatch agent config
   # (init/natkit-init). Its result goes to the serial console as one line.
@@ -46,20 +46,20 @@ services:
   # root login on ttyS0 for the EC2 Serial Console (off per account, gated by IAM). The password hash comes from
   # user-data console_password (SSM); without it root is locked.
   - name: getty
-    image: linuxkit/getty:a86d74c8f89be8956330c3b115b0b1f2e09ef6e0
+    image: linuxkit/getty:a86d74c8f89be8956330c3b115b0b1f2e09ef6e0@sha256:30b67e20789431c2577847f4a2f71511a460be64d9337ce03d842e91f7f62a38
     binds.add:
       - /run/natkit/getty.shadow:/hostroot/etc/getty.shadow
   # also brings up a static ENI that natkit-init attaches after boot (hotplug)
   - name: dhcpcd
-    image: linuxkit/dhcpcd:b87e9ececac55a65eaa592f4dd8b4e0c3009afdb
+    image: linuxkit/dhcpcd:b87e9ececac55a65eaa592f4dd8b4e0c3009afdb@sha256:c58b85778641b3d153f4094a9ae7aea62829fc0f84126fb15a2bb26041861ada
   - name: acpid # instance stop/terminate: ACPI power button -> poweroff
-    image: linuxkit/acpid:dbd30b25903bf17042c22171b729f94c4bd3d98d
+    image: linuxkit/acpid:dbd30b25903bf17042c22171b729f94c4bd3d98d@sha256:935478ed87254975465333a1b82b64894747a5860cd4ae623ebc2f469b33fd9a
     binds.add:
       - /etc/acpi/PWRF:/etc/acpi/PWRF
   - name: rngd
-    image: linuxkit/rngd:984eb580ecb63986f07f626b61692a97aacd7198
+    image: linuxkit/rngd:984eb580ecb63986f07f626b61692a97aacd7198@sha256:fa6ab92b5f9c664b02abfa7d398cf84cd7bb5efa5d1b4aefd50f87008099e172
   - name: ntpd # Amazon Time Sync Service, link-local
-    image: linuxkit/openntpd:2508f1d040441457a0b3e75744878afdf61bc473
+    image: linuxkit/openntpd:2508f1d040441457a0b3e75744878afdf61bc473@sha256:d0e9a6d05a6391a598facb97ad0c6f849d4bc35e146f62b34cf5f400a1d04823
     binds.add:
       - /etc/natkit/ntpd.conf:/etc/ntpd.conf
   # CloudWatch agent, only with user-data cwagent_enabled: pulled by digest at boot through the system containerd

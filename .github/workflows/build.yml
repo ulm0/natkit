@@ -70,7 +70,8 @@ jobs:
             echo "FROM $REGISTRY/$i:${{ steps.key.outputs.version }}" | docker build -q -t "$REGISTRY/$i:${{ steps.key.outputs.tag }}" \
               --label org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }} \
               --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }} -
-            docker push "$REGISTRY/$i:${{ steps.key.outputs.tag }}"
+            # a fork's PR has a read-only token: its kernel is only built here, and again in the image job
+            [ "${{ github.event.pull_request.head.repo.fork }}" = true ] || docker push "$REGISTRY/$i:${{ steps.key.outputs.tag }}"
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && steps.cached.outputs.hit != 'true'
@@ -111,7 +112,7 @@ jobs:
           - { arch: arm64, runner: ubuntu-26.04-arm }
           - { arch: amd64, runner: ubuntu-26.04 }
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: write
@@ -133,10 +134,11 @@ jobs:
         run: |
           version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)
           hash=$(cat kernel/*.config kernel/*.sh kernel/jool.Dockerfile | sha256sum | cut -c1-12)
+          # not in the registry: a fork's PR that changes kernel/ (it can't push). Build it here then.
           for i in kernel jool; do
-            docker pull "$REGISTRY/$i:$version-$hash-${{ matrix.arch }}"
-            docker tag "$REGISTRY/$i:$version-$hash-${{ matrix.arch }}" "$REGISTRY/$i:$version"
-          done
+            docker pull "$REGISTRY/$i:$version-$hash-${{ matrix.arch }}" &&
+              docker tag "$REGISTRY/$i:$version-$hash-${{ matrix.arch }}" "$REGISTRY/$i:$version"
+          done || make kernel KERNEL_VERSION="$version"
       - run: make ARCH=${{ matrix.arch }}
       - run: cd out && sha256sum natkit-${{ matrix.arch }}-efi.img | tee SHA256SUMS-${{ matrix.arch }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -214,7 +216,7 @@ jobs:
   # the boot test's trap doesn't run if the job is cancelled or the runner dies: remove its resources by tag regardless
   boot-cleanup:
     needs: ami
-    if: always() && needs.ami.result != 'skipped'
+    if: always() && needs.ami.result != 'skipped' && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 15
     permissions:

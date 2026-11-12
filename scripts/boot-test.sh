@@ -9,13 +9,16 @@
 #  4. failover: instance B boots with the same user-data while A holds the ENI; A is terminated; B must attach the
 #     ENI, take the EIP, and the client's egress must work again through B
 #  5. the CloudWatch agent on B (pulled at boot) must publish mem_used_percent
+# When the subnets have IPv6 CIDRs, NAT64 too: the route table gets 64:ff9b::/96 -> the ENI and the client reaches an
+# IPv4-only address through it over IPv6 (steps 3 and 4); the egress must again be the EIP.
 # Everything is tagged natkit.io/boot-test=<tag> and removed on exit (CI's boot-cleanup also removes it by tag).
 #
 #   scripts/boot-test.sh <ami-id> <arm64|amd64>
 #
 # Needs AWS credentials + AWS_REGION and:
 #   NATKIT_TEST_PUBLIC_SUBNET        subnet with an internet gateway route (the NAT instances)
-#   NATKIT_TEST_PRIVATE_SUBNET       subnet with its own route table and no other egress (the client), same VPC/AZ
+#   NATKIT_TEST_PRIVATE_SUBNET       subnet with its own route table and no other egress (the client), same VPC/AZ;
+#                                    no IPv6 egress either (no egress-only gateway), or the NAT64 check proves nothing
 #   NATKIT_TEST_INSTANCE_PROFILE     NAT role: ec2:AssociateAddress, ec2:AttachNetworkInterface,
 #                                    ec2:ModifyNetworkInterfaceAttribute, ssm:GetParameter, CloudWatchAgentServerPolicy
 # Both subnets' instances use the VPC's default security group (admits traffic from itself).
@@ -31,7 +34,7 @@ esac
 PARAM=/natkit/boot-test/$TAG/cwagent
 NS=natkit-boot-test
 TAGS="{Key=natkit.io/boot-test,Value=$TAG}"
-eip='' eni='' a='' b='' client='' rt='' ud=$(mktemp) cud=$(mktemp)
+eip='' eni='' a='' b='' client='' rt='' v6='' ud=$(mktemp) cud=$(mktemp)
 
 cleanup() {
 	set +e
@@ -44,6 +47,7 @@ cleanup() {
 		aws ec2 wait instance-terminated --instance-ids $ids
 	fi
 	[ -z "$rt" ] || aws ec2 delete-route --route-table-id "$rt" --destination-cidr-block 0.0.0.0/0
+	[ -z "$rt" ] || [ -z "$v6" ] || aws ec2 delete-route --route-table-id "$rt" --destination-ipv6-cidr-block 64:ff9b::/96
 	[ -z "$eni" ] || aws ec2 delete-network-interface --network-interface-id "$eni"
 	[ -z "$eip" ] || aws ec2 release-address --allocation-id "$eip"
 	aws ssm delete-parameter --name "$PARAM" 2>/dev/null
@@ -63,16 +67,23 @@ line() {
 	return 1
 }
 
+# NAT64 needs IPv6 in both subnets
+v6=$(aws ec2 describe-subnets --subnet-ids "$PUB" "$PRIV" --query 'length(Subnets[?Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlock != null])' --output text)
+[ "$v6" = 2 ] && v6=1 || v6=''
+[ -n "$v6" ] || echo "no IPv6 in the test subnets: NAT64 is only checked for 'nat64 on'" >&2
+
 # 1. EIP, static ENI, route, agent config
 eip=$(aws ec2 allocate-address --domain vpc --tag-specifications "ResourceType=elastic-ip,Tags=[$TAGS]" --query AllocationId --output text)
 eip_ip=$(aws ec2 describe-addresses --allocation-ids "$eip" --query 'Addresses[0].PublicIp' --output text)
-eni=$(aws ec2 create-network-interface --subnet-id "$PUB" --description "natkit boot test $TAG" \
+eni=$(aws ec2 create-network-interface --subnet-id "$PUB" --description "natkit boot test $TAG" ${v6:+--ipv6-address-count 1} \
 	--tag-specifications "ResourceType=network-interface,Tags=[$TAGS]" --query NetworkInterface.NetworkInterfaceId --output text)
 aws ec2 modify-network-interface-attribute --network-interface-id "$eni" --no-source-dest-check
 rt=$(aws ec2 describe-route-tables --filters "Name=association.subnet-id,Values=$PRIV" --query 'RouteTables[0].RouteTableId' --output text)
 [ "$rt" != None ] || { rt=; die "$PRIV has no route table of its own"; }
 aws ec2 create-route --route-table-id "$rt" --destination-cidr-block 0.0.0.0/0 --network-interface-id "$eni" >/dev/null ||
 	aws ec2 replace-route --route-table-id "$rt" --destination-cidr-block 0.0.0.0/0 --network-interface-id "$eni"
+[ -z "$v6" ] || aws ec2 create-route --route-table-id "$rt" --destination-ipv6-cidr-block 64:ff9b::/96 --network-interface-id "$eni" >/dev/null ||
+	aws ec2 replace-route --route-table-id "$rt" --destination-ipv6-cidr-block 64:ff9b::/96 --network-interface-id "$eni"
 aws ssm put-parameter --name "$PARAM" --type String --overwrite --value \
 	"{\"metrics\":{\"namespace\":\"$NS\",\"append_dimensions\":{\"InstanceId\":\"\${aws:InstanceId}\"},\"metrics_collected\":{\"mem\":{\"measurement\":[\"mem_used_percent\"],\"metrics_collection_interval\":60}}}}" >/dev/null
 echo "EIP $eip ($eip_ip), ENI $eni, route table $rt" >&2
@@ -81,13 +92,13 @@ cat >"$ud" <<EOF
 eip_id: $eip
 eni_id: $eni
 nf_conntrack_max: 131072
-ip_local_port_range: "1024 65535"
+ip_local_port_range: "1024 61000"
 cwagent_enabled: true
 cwagent_cfg_param_name: $PARAM
 EOF
 nat() { # nat <Name>: launches a NAT instance, prints its ID
 	aws ec2 run-instances --image-id "$AMI" --instance-type "$TYPE" --iam-instance-profile "Name=$PROFILE" \
-		--network-interfaces "DeviceIndex=0,SubnetId=$PUB,AssociatePublicIpAddress=true,DeleteOnTermination=true" \
+		--network-interfaces "DeviceIndex=0,SubnetId=$PUB,AssociatePublicIpAddress=true,DeleteOnTermination=true${v6:+,Ipv6AddressCount=1}" \
 		--metadata-options HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=1 \
 		--user-data "file://$ud" --block-device-mappings 'DeviceName=/dev/xvda,Ebs={Encrypted=true}' \
 		--tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$1},$TAGS]" \
@@ -108,16 +119,25 @@ cami=$(aws ssm get-parameter --name "/aws/service/ami-amazon-linux-latest/al2023
 # detached from cloud-init, which would otherwise wait for (or reap) the loop
 cat >"$cud" <<'EOF'
 #!/bin/sh
-setsid sh -c 'n=0; while :; do n=$((n + 1)); echo "natkit-test: egress $n $(curl -s -m 5 https://checkip.amazonaws.com || echo none)" >/dev/ttyS0; sleep 15; done' </dev/null >/dev/null 2>&1 &
+H=checkip.amazonaws.com
+setsid sh -c 'n=0; while :; do n=$((n + 1))
+	echo "natkit-test: egress $n $(curl -s -m 5 https://'$H' || echo none)" >/dev/ttyS0
+	a=$(getent ahostsv4 '$H' | cut -d" " -f1 | head -n 1)
+	echo "natkit-test: nat64 $n $(curl -s -m 5 --resolve "'$H':443:[64:ff9b::$a]" https://'$H' || echo none)" >/dev/ttyS0
+	sleep 15; done' </dev/null >/dev/null 2>&1 &
 EOF
 client=$(aws ec2 run-instances --image-id "$cami" --instance-type "$CTYPE" \
-	--network-interfaces "DeviceIndex=0,SubnetId=$PRIV,AssociatePublicIpAddress=false,DeleteOnTermination=true" \
+	--network-interfaces "DeviceIndex=0,SubnetId=$PRIV,AssociatePublicIpAddress=false,DeleteOnTermination=true${v6:+,Ipv6AddressCount=1}" \
 	--metadata-options HttpTokens=required,HttpEndpoint=enabled --user-data "file://$cud" \
 	--tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=natkit-boot-test-client},$TAGS]" \
 	--query 'Instances[0].InstanceId' --output text)
 echo "client $client" >&2
 l=$(line "$client" "natkit-test: egress [0-9]* $eip_ip\$") || die "client: no egress through the EIP after 15 min"
 echo "client: $l"
+if [ -n "$v6" ]; then
+	l=$(line "$client" "natkit-test: nat64 [0-9]* $eip_ip\$") || die "client: no NAT64 egress through the EIP after 15 min"
+	echo "client: $l"
+fi
 
 # 4. failover: B waits for the ENI while A holds it
 b=$(nat natkit-boot-test-b)
@@ -139,6 +159,17 @@ for _ in $(seq 40); do
 done
 [ $# -gt 0 ] || die "client: no egress through B after 10 min"
 echo "client after failover: $*"
+if [ -n "$v6" ]; then
+	for _ in $(seq 40); do
+		sleep 15
+		# shellcheck disable=SC2046 # split on purpose: natkit-test: nat64 <n> <ip>
+		set -- $(console "$client" | tr -d '\r' | grep -a 'natkit-test: nat64' | tail -n 1)
+		[ "${3:-0}" -gt "${n0:-0}" ] && [ "${4:-}" = "$eip_ip" ] && break
+		set --
+	done
+	[ $# -gt 0 ] || die "client: no NAT64 egress through B after 10 min"
+	echo "client after failover: $*"
+fi
 
 # 5. the CloudWatch agent on B
 for _ in $(seq 40); do

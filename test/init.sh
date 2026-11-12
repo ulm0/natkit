@@ -33,6 +33,7 @@ run "" "natkit-init
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth0, eip none, nat64 off, cwagent off' ]
 	nft list table ip natkit | grep -q 'oifname \"eth0\" masquerade'
 	nft list table inet natkit | grep -q 'hook input priority filter; policy drop;'
+	nft list table inet natkit | grep -q 'ct state invalid drop'
 	[ \$(cat /proc/sys/net/ipv4/conf/eth0/send_redirects) = 0 ]
 	[ \$(cat /proc/sys/net/ipv4/conf/all/rp_filter) = 0 ] && [ \$(cat /proc/sys/net/ipv4/conf/eth0/rp_filter) = 0 ]
 	[ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]
@@ -51,7 +52,7 @@ console_password: /natkit/test/root-hash' "ip link add eth9 address 02:42:ac:11:
 	natkit-init
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth9, eip eipalloc-0123, nat64 off, cwagent on' ]
 	ip -o link show eth9 | grep -q ',UP'
-	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"AssociateAddress\",\"ModifyNetworkInterfaceAttribute\",\"AttachNetworkInterface\",\"AttachNetworkInterface\"]' ]
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"ModifyNetworkInterfaceAttribute\",\"AttachNetworkInterface\",\"AttachNetworkInterface\",\"AssociateAddress\"]' ]
 	[ \"\$(tr -s '\t ' ' ' </proc/sys/net/ipv4/ip_local_port_range)\" = '2048 60000' ]
 	[ \$(cat /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_established) = 3600 ]
 	[ \$(cat /proc/sys/net/ipv4/tcp_keepalive_time) = 600 ] && [ \$(cat /proc/sys/net/ipv4/tcp_max_syn_backlog) = 4096 ]
@@ -65,10 +66,14 @@ run 'interface: eth9' "ip link add eth9 type dummy
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth9 private eth9, eip none, nat64 off, cwagent off' ]
 	nft list table ip natkit | grep -q 'oifname \"eth9\" masquerade'"
 
+echo "== nat64: false is accepted (and off)"
+run 'nat64: false' "natkit-init | grep -q 'NAT64: off in user-data'"
+
 echo "== bad user-data is refused, with the reason on the console"
 fails 'eip: eipalloc-0123' "user-data: unknown key 'eip'"
 fails 'eip_id: eipalloc-0123; rm -rf /' "user-data: eip_id: bad value"
 fails 'nf_conntrack_max: lots' "user-data: nf_conntrack_max: bad value"
+fails 'nat64: maybe' "user-data: nat64: bad value"
 fails 'cwagent_enabled: true' "cwagent_enabled needs cwagent_cfg_param_name"
 fails 'cwagent_enabled: true
 cwagent_cfg_param_name: /natkit/test/notjson' "cwagent: /natkit/test/notjson is not a JSON object"
