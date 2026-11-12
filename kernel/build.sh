@@ -10,7 +10,7 @@
 # Needs docker; ~15 min on 4 CPUs.
 set -eu
 
-KERNEL_VERSION=${1:-6.18.62}
+KERNEL_VERSION=${1:-6.18.63}
 LINUXKIT_REF=${LINUXKIT_REF:-f3906d1f6650f79d74adf3cba42b04ca9e21ea7d} # linuxkit/linuxkit master, 2026-10-15
 LINUXKIT=$(cd "$(dirname "${LINUXKIT:-bin/linuxkit}")" && pwd)/$(basename "${LINUXKIT:-bin/linuxkit}")
 SERIES=$(echo "$KERNEL_VERSION" | cut -d. -f1-2).x

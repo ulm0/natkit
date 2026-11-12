@@ -8,7 +8,7 @@ ALPINE := alpine:3.24@sha256:3f4d6b32e26703c6082839234f43769d5046b3ac7c910033911
 REGISTRY := ghcr.io/ulm0/natkit
 # images natkit.yml uses; local builds tag these names, otherwise linuxkit pulls them from GHCR (CI pushes them)
 INIT_IMAGE := $(REGISTRY)/init:latest
-KERNEL_VERSION ?= 6.18.62
+KERNEL_VERSION ?= 6.18.63
 KERNEL_IMAGE := $(REGISTRY)/kernel:$(KERNEL_VERSION)
 JOOL_IMAGE := $(REGISTRY)/jool:$(KERNEL_VERSION)
 # the docker daemon's architecture: everything builds natively (arm64 or amd64)
