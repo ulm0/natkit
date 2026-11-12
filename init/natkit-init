@@ -133,9 +133,10 @@ retry() {
 	tries=$1 what=$2
 	shift 2
 	i=0
-	until "$@" >/dev/null; do
+	# the last try's stderr (curl's or the AWS error) goes on the console with the failure
+	until "$@" >/dev/null 2>"$RUN/retry.err"; do
 		i=$((i + 1))
-		[ "$i" -lt "$tries" ] || die "$what failed"
+		[ "$i" -lt "$tries" ] || die "$what failed: $(tr '\n' ' ' <"$RUN/retry.err")"
 		sleep 3
 	done
 }

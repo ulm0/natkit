@@ -81,6 +81,7 @@ fails 'cwagent_enabled: true
 cwagent_cfg_param_name: /natkit/test/notjson' "cwagent: /natkit/test/notjson is not a JSON object"
 fails 'console_password: /natkit/test/plain' "console_password: /natkit/test/plain is not a crypt hash"
 fails 'interface: eth7' "interface: no interface eth7"
+fails 'eip_id: eipalloc-0bad' "AssociateAddress eipalloc-0bad failed: natkit-init: AssociateAddress: HTTP 400 InvalidParameterValue: unexpected"
 fails '- a list' "user-data is not a YAML map"
 
 echo "== a failed setup still leaves the getty a (locked) shadow file"
