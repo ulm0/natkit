@@ -34,6 +34,9 @@ onboot:
     net: host
     binds:
       - /run:/run
+      # dhcpcd writes it under /run/resolvconf; without it the image's empty file sends DNS to 127.0.0.1 and the EC2
+      # and SSM endpoints don't resolve (IMDS does: it's an address)
+      - /etc/resolv.conf:/etc/resolv.conf
       - /lib/modules:/lib/modules:ro
       - /sys:/sys
     devices:
