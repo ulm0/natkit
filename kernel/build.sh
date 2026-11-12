@@ -49,7 +49,8 @@ docker run --rm --platform "$PLATFORM" -v "$DIR:/k" "$BUILD_IMAGE" sh -euc "
 	cd linux-$KERNEL_VERSION && make ARCH=$KARCH allnoconfig >/dev/null
 	cat /k/natkit.config /k/natkit-$UNAME.config | grep '^CONFIG_' >/tmp/want
 	while IFS== read -r o v; do scripts/config --set-val \"\${o#CONFIG_}\" \"\$v\"; done </tmp/want
-	make ARCH=$KARCH olddefconfig >/dev/null
+	# plain make (the native ARCH: x86, not x86_64): LinuxKit's build diffs the config's header line too
+	make olddefconfig >/dev/null
 	# a select/depends chain that isn't met silently drops an option: fail instead
 	# (=n also holds when the symbol is absent: its menu is off)
 	while read -r l; do
