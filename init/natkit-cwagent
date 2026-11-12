@@ -7,17 +7,22 @@ set -u
 CONF=/run/natkit/cwagent
 IMAGE=public.ecr.aws/cloudwatch-agent/cloudwatch-agent:1.300074.1b2005@sha256:f6ce19de7f57fe9c536eb01dbebfb4c997fa053fa891d02711858642dda8a3f4
 ctr() { /usr/bin/ctr -n natkit "$@"; }
+# say <message>: to the serial console (memlogd's log isn't reachable from outside) and stderr
+say() { echo "natkit-cwagent: $*" | tee -a "${NATKIT_CONSOLE:-/dev/console}" >&2; }
 
 [ -f "$CONF/cwagentconfig.json" ] || { echo "natkit-cwagent: not enabled"; exit 0; }
 
-until ctr image pull "$IMAGE" >/dev/null; do
-	echo "natkit-cwagent: pull failed, retrying" >&2
+until err=$(ctr image pull "$IMAGE" 2>&1 >/dev/null); do
+	say "pull failed, retrying: $(printf '%s' "$err" | tail -n 1)"
 	sleep 10
 done
+say "pulled $IMAGE"
 while :; do
 	ctr task kill -s KILL cwagent 2>/dev/null
 	ctr container rm cwagent 2>/dev/null
-	ctr run --rm --net-host --mount "type=bind,src=$CONF,dst=/etc/cwagentconfig,options=rbind:ro" "$IMAGE" cwagent
-	echo "natkit-cwagent: agent exited ($?), restarting" >&2
+	# ctr run, unlike a LinuxKit service, gives the container no resolv.conf: the host's (dhcpcd's), read-only
+	ctr run --rm --net-host --mount "type=bind,src=$CONF,dst=/etc/cwagentconfig,options=rbind:ro" \
+		--mount "type=bind,src=/etc/resolv.conf,dst=/etc/resolv.conf,options=rbind:ro" "$IMAGE" cwagent
+	say "agent exited ($?), restarting"
 	sleep 10
 done
