@@ -32,6 +32,8 @@ echo "== no user-data: masquerade out of eth0, nothing else"
 run "" "natkit-init
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth0, eip none, nat64 off, cwagent off' ]
 	nft list table ip natkit | grep -q 'oifname \"eth0\" masquerade'
+	nft list table inet natkit | grep -q 'hook input priority filter; policy drop;'
+	[ \$(cat /proc/sys/net/ipv4/conf/eth0/send_redirects) = 0 ]
 	[ \$(cat /proc/sys/net/ipv4/conf/all/rp_filter) = 0 ] && [ \$(cat /proc/sys/net/ipv4/conf/eth0/rp_filter) = 0 ]
 	[ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]
 	[ \"\$($calls)\" = '[]' ] && [ ! -e /run/natkit/cwagent ]"
@@ -73,6 +75,9 @@ cwagent_cfg_param_name: /natkit/test/notjson' "cwagent: /natkit/test/notjson is 
 fails 'console_password: /natkit/test/plain' "console_password: /natkit/test/plain is not a crypt hash"
 fails 'interface: eth7' "interface: no interface eth7"
 fails '- a list' "user-data is not a YAML map"
+
+echo "== a failed setup still leaves the getty a (locked) shadow file"
+run 'bogus: 1' "if natkit-init 2>/dev/null; then exit 1; fi; [ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]"
 
 echo "== the jool tool matches the modules' version"
 docker run --rm --entrypoint jool "$IMG" --version | grep -q '4\.1\.15' || { echo "FAIL: jool tool isn't 4.1.15"; exit 1; }

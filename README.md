@@ -74,6 +74,19 @@ where you can.
 The CloudWatch agent image (~150 MB unpacked) is pulled from `public.ecr.aws` through the NAT's own egress and kept
 in memory: use at least a `t4g.micro`/`t3.micro` with it.
 
+## Hardening
+
+- No SSH, SSM agent or package manager; the only login is the EC2 Serial Console, locked unless `console_password`
+  is set.
+- The instance accepts no new inbound connections to itself (nftables input policy drop: replies, ICMP and DHCP
+  only). Forwarded traffic is not filtered: use the security group.
+- Kernel: built from `allnoconfig` (no USB, wireless, filesystems beyond tmpfs/overlay, `/dev/mem`, kexec or 32-bit
+  syscalls), CPU mitigations, KASLR, stack protector, hardened usercopy, zeroed allocations. Module loading is
+  disabled once Jool is in.
+- No ICMP redirects or source routing; unprivileged BPF and kernel log access are off.
+- `natkit-init` runs with three capabilities; the CloudWatch agent launcher with none.
+- Images are pinned by digest or content hash; the Jool source by checksum. IMDSv2 only.
+
 ## Building
 
 Everything builds natively for the Docker daemon's architecture (arm64 or amd64):

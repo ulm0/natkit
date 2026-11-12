@@ -28,7 +28,9 @@ onboot:
   - name: natkit-init
     image: ghcr.io/ulm0/natkit/init:latest # init/; `make init-image` builds it locally
     capabilities:
-      - all
+      - CAP_NET_ADMIN # nftables, interfaces, net sysctls, Jool's netlink
+      - CAP_SYS_MODULE # Jool's modules
+      - CAP_SYS_ADMIN # kernel.modules_disabled
     net: host
     binds:
       - /run:/run
@@ -64,11 +66,10 @@ services:
   # and run in the host network (init/natkit-cwagent). Otherwise it exits at once and costs no memory.
   - name: cwagent
     image: ghcr.io/ulm0/natkit/init:latest
-    capabilities:
-      - all
     net: host
-    binds:
-      - /run:/run
+    binds: # no capabilities: it only talks to containerd's socket, as root
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock
+      - /run/natkit:/run/natkit:ro
       - /usr/bin/ctr:/usr/bin/ctr:ro
     command: ["/usr/bin/natkit-cwagent"]
 files:
@@ -101,6 +102,19 @@ files:
       net.ipv6.conf.all.forwarding = 1
       net.ipv4.conf.all.rp_filter = 0
       net.ipv4.conf.default.rp_filter = 0
+      # hardening: no ICMP redirects in or out (natkit-init also clears send_redirects per interface), no source
+      # routing, SYN cookies, no kernel addresses or log for unprivileged users, no unprivileged BPF
+      net.ipv4.conf.all.accept_redirects = 0
+      net.ipv4.conf.default.accept_redirects = 0
+      net.ipv6.conf.all.accept_redirects = 0
+      net.ipv6.conf.default.accept_redirects = 0
+      net.ipv4.conf.all.send_redirects = 0
+      net.ipv4.conf.default.send_redirects = 0
+      net.ipv4.conf.all.accept_source_route = 0
+      net.ipv4.tcp_syncookies = 1
+      kernel.dmesg_restrict = 1
+      kernel.kptr_restrict = 1
+      kernel.unprivileged_bpf_disabled = 1
   - path: etc/natkit/ntpd.conf
     mode: "0644"
     contents: |

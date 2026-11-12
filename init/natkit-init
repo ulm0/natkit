@@ -33,6 +33,9 @@ die() { echo "natkit-init: $*" >&2; console "FAIL $*"; exit 1; }
 
 umask 022
 mkdir -p "$RUN"
+# the getty binds this file: it must exist even if the setup fails below, or there'd be no console to see why.
+# Root stays locked until console_password replaces it.
+(umask 077 && echo 'root:*::0:99999:7:::' >"$RUN/getty.shadow")
 
 # IMDSv2 session token (hop limit 1 is enough: this container shares the host network)
 T=
@@ -199,14 +202,30 @@ b=$(val nf_conntrack_buckets)
 
 # forwarding itself is etc/natkit/sysctl.conf's; rp_filter also per interface (the ENI attached just now included)
 for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 >"$f"; done
+# a router on one interface would tell clients to bypass it (ICMP redirects); the kernel ORs all with each interface
+for f in /proc/sys/net/ipv4/conf/*/send_redirects; do echo 0 >"$f"; done
 
-# masquerade out of the public interface; one transaction, so there's no moment without the rule
+# masquerade out of the public interface; one transaction, so there's no moment without the rule.
+# The instance itself accepts nothing new (it has no listening service; this keeps it so): replies, ICMP (path MTU,
+# IPv6 neighbour discovery) and DHCP only. Forwarded traffic isn't filtered: that's the security group's job.
+# NAT64 packets are taken by Jool in prerouting, before this input chain.
 nft -f - <<EOF || die "nftables"
 flush ruleset
 table ip natkit {
 	chain postrouting {
 		type nat hook postrouting priority srcnat; policy accept;
 		oifname "$public" masquerade comment "NAT routing rule installed by natkit"
+	}
+}
+table inet natkit {
+	chain input {
+		type filter hook input priority filter; policy drop;
+		ct state established,related accept
+		iifname "lo" accept
+		meta l4proto icmp accept
+		meta l4proto ipv6-icmp accept
+		udp dport 68 accept
+		udp dport 546 accept
 	}
 }
 EOF
@@ -227,6 +246,9 @@ if [ -f "$m/jool.ko" ]; then
 else
 	log "NAT64: no Jool modules for $(uname -r), skipped"
 fi
+# nothing loads a module after this (drivers and netfilter are built in): no more kernel code until reboot.
+# Not under test/init.sh, where it would lock the docker host's kernel.
+[ -n "${NATKIT_IMDS:-}" ] || sysctl -q -w kernel.modules_disabled=1 || die "sysctl kernel.modules_disabled"
 
 # CloudWatch agent: natkit-cwagent (a service) runs it when this config exists
 cwagent=off
@@ -247,7 +269,7 @@ if [ -n "$cp" ]; then
 	hash=$(ssm "$cp" console_password)
 	case $hash in '$'*) ;; *) die "console_password: $cp is not a crypt hash (openssl passwd -6)" ;; esac
 fi
-(umask 077 && echo "root:$hash::0:99999:7:::" >"$RUN/getty.shadow") # empty lastchg: 0 would force a password change
+[ "$hash" = '*' ] || (umask 077 && echo "root:$hash::0:99999:7:::" >"$RUN/getty.shadow") # empty lastchg: 0 would force a password change
 
 console "ready, public $public private $private, eip ${eip_id:-none}, nat64 $nat64, cwagent $cwagent"
 log "done"
