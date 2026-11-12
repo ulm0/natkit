@@ -25,7 +25,7 @@ run() {
 }
 # fails <user-data> <console reason>: natkit-init must exit non-zero and put the reason on the console
 fails() {
-	run "$1" "if natkit-init >/dev/null 2>&1; then exit 1; fi; grep -qF 'natkit: FAIL $2' /tmp/console" ||
+	run "$1" "if natkit-init >/dev/null 2>&1; then exit 1; fi; grep -qF \"natkit: FAIL $2\" /tmp/console" ||
 		{ echo "FAIL: not refused with '$2': $1"; exit 1; }
 }
 calls='curl -fsS http://$MOCK:8080/_calls' # $MOCK: expanded in the container
