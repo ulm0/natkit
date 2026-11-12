@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")/.."
 IMG=ghcr.io/ulm0/natkit/init:latest
 NET=natkit-init-test
-docker build -q -t "$IMG" init >/dev/null
+docker build -q -t "$IMG" init >/dev/null 2>&1 || docker build --progress plain -t "$IMG" init # again, with the log
 docker network create "$NET" >/dev/null
 trap 'docker rm -f natkit-mock >/dev/null 2>&1; docker network rm "$NET" >/dev/null; rm -f test/.user-data.yaml' EXIT
 
