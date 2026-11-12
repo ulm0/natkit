@@ -1,0 +1,281 @@
+# Builds natively on GitHub's arm64 and x64 runners, one matrix leg per architecture:
+#   kernel  kernel:<ver>-<hash>-<arch> + jool:<ver>-<hash>-<arch> (rebuilt only when kernel/ changes); on main,
+#           the multi-arch kernel:<ver> and jool:<ver> that natkit.yml names
+#   image   init image tested against a mock IMDS/EC2/SSM (test/init.sh); out/natkit-<arch>-efi.img as an artifact;
+#           init:<sha>, :latest (main), :<tag> (multi-arch)
+#   ami     on v* tags or a manual run: a UEFI AMI per arch named natkit-<tag|sha>-<arch>, tagged natkit.io/release
+#           (scripts/ami.sh), then the end-to-end boot test (scripts/boot-test.sh), one arch at a time (they share
+#           the test subnet's route table)
+#   release on v* tags, once both AMIs pass: the GitHub release
+# Repo variables: AWS_ROLE_ARN (GitHub OIDC role), AWS_REGION, NATKIT_BUCKET, NATKIT_TEST_PUBLIC_SUBNET,
+# NATKIT_TEST_PRIVATE_SUBNET, NATKIT_TEST_INSTANCE_PROFILE.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io/ulm0/natkit # what natkit.yml references
+
+jobs:
+  kernel:
+    strategy:
+      matrix:
+        include:
+          - { arch: arm64, runner: ubuntu-26.04-arm }
+          - { arch: amd64, runner: ubuntu-26.04 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin
+          key: linuxkit-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+          restore-keys: linuxkit-${{ runner.arch }}-
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: key # the kernel version natkit.yml uses + a hash of what the kernel and Jool builds depend on
+        run: |
+          version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)
+          hash=$(cat kernel/*.config kernel/*.sh kernel/jool.Dockerfile | sha256sum | cut -c1-12)
+          echo "tag=$version-$hash-${{ matrix.arch }}" >>"$GITHUB_OUTPUT"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+      - id: cached
+        run: |
+          docker manifest inspect "$REGISTRY/kernel:${{ steps.key.outputs.tag }}" >/dev/null 2>&1 &&
+            docker manifest inspect "$REGISTRY/jool:${{ steps.key.outputs.tag }}" >/dev/null 2>&1 && echo hit=true >>"$GITHUB_OUTPUT" || true
+      - if: steps.cached.outputs.hit != 'true'
+        run: |
+          make kernel KERNEL_VERSION=${{ steps.key.outputs.version }}
+          for i in kernel jool; do
+            # the label records the commit that built it (on a PR, its head commit: github.sha is the merge commit)
+            echo "FROM $REGISTRY/$i:${{ steps.key.outputs.version }}" | docker build -q -t "$REGISTRY/$i:${{ steps.key.outputs.tag }}" \
+              --label org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }} \
+              --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }} -
+            docker push "$REGISTRY/$i:${{ steps.key.outputs.tag }}"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && steps.cached.outputs.hit != 'true'
+        with:
+          name: kernel-config-${{ matrix.arch }}
+          path: kernel/config-*
+          if-no-files-found: ignore
+
+  # main: kernel:<ver> and jool:<ver>, multi-arch, move to this build
+  kernel-manifest:
+    needs: kernel
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)
+          hash=$(cat kernel/*.config kernel/*.sh kernel/jool.Dockerfile | sha256sum | cut -c1-12)
+          for i in kernel jool; do
+            docker buildx imagetools create -t "$REGISTRY/$i:$version" -t "$REGISTRY/$i:$version-$hash" \
+              "$REGISTRY/$i:$version-$hash-arm64" "$REGISTRY/$i:$version-$hash-amd64"
+          done
+
+  image:
+    needs: kernel
+    strategy:
+      matrix:
+        include:
+          - { arch: arm64, runner: ubuntu-26.04-arm }
+          - { arch: amd64, runner: ubuntu-26.04 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin
+          key: linuxkit-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+          restore-keys: linuxkit-${{ runner.arch }}-
+      - run: shellcheck -S warning init/natkit-init init/natkit-cwagent kernel/build.sh kernel/jool.sh scripts/*.sh test/init.sh
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: make test
+      - name: this commit's kernel and Jool modules, under the names natkit.yml uses
+        run: |
+          version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)
+          hash=$(cat kernel/*.config kernel/*.sh kernel/jool.Dockerfile | sha256sum | cut -c1-12)
+          for i in kernel jool; do
+            docker pull "$REGISTRY/$i:$version-$hash-${{ matrix.arch }}"
+            docker tag "$REGISTRY/$i:$version-$hash-${{ matrix.arch }}" "$REGISTRY/$i:$version"
+          done
+      - run: make ARCH=${{ matrix.arch }}
+      - run: cd out && sha256sum natkit-${{ matrix.arch }}-efi.img | tee SHA256SUMS-${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: natkit-${{ matrix.arch }}-${{ github.sha }}
+          path: |
+            out/natkit-${{ matrix.arch }}-efi.img
+            out/SHA256SUMS-${{ matrix.arch }}
+          retention-days: 14
+      - if: github.event_name != 'pull_request'
+        run: |
+          docker tag "$REGISTRY/init:latest" "$REGISTRY/init:${{ github.sha }}-${{ matrix.arch }}"
+          docker push "$REGISTRY/init:${{ github.sha }}-${{ matrix.arch }}"
+
+  init-manifest:
+    needs: image
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          set -- -t "$REGISTRY/init:${{ github.sha }}"
+          [ "${{ github.ref }}" = refs/heads/main ] && set -- "$@" -t "$REGISTRY/init:latest"
+          [ "${{ github.ref_type }}" = tag ] && set -- "$@" -t "$REGISTRY/init:${{ github.ref_name }}"
+          docker buildx imagetools create "$@" "$REGISTRY/init:${{ github.sha }}-arm64" "$REGISTRY/init:${{ github.sha }}-amd64"
+
+  ami:
+    needs: image
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    strategy:
+      max-parallel: 1 # both boot tests route the same private subnet through their own ENI
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC -> AWS_ROLE_ARN
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      NATKIT_BUCKET: ${{ vars.NATKIT_BUCKET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: natkit-${{ matrix.arch }}-${{ github.sha }}
+          path: out
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - id: ami
+        run: |
+          name=natkit-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}-${{ matrix.arch }}
+          ami=$(scripts/ami.sh out/natkit-${{ matrix.arch }}-efi.img ${{ matrix.arch }} "$name" "natkit.io/release=$name")
+          echo "ami=$ami" >>"$GITHUB_OUTPUT"
+          echo "### AMI \`$ami\` ($name, $AWS_REGION)" >>"$GITHUB_STEP_SUMMARY"
+      - name: boot test (EIP, static ENI, client egress, failover, CloudWatch agent)
+        run: scripts/boot-test.sh ${{ steps.ami.outputs.ami }} ${{ matrix.arch }}
+        env:
+          NATKIT_TEST_PUBLIC_SUBNET: ${{ vars.NATKIT_TEST_PUBLIC_SUBNET }}
+          NATKIT_TEST_PRIVATE_SUBNET: ${{ vars.NATKIT_TEST_PRIVATE_SUBNET }}
+          NATKIT_TEST_INSTANCE_PROFILE: ${{ vars.NATKIT_TEST_INSTANCE_PROFILE }}
+          NATKIT_BOOT_TEST_TAG: run-${{ github.run_id }}-${{ matrix.arch }}
+
+  # the boot test's trap doesn't run if the job is cancelled or the runner dies: remove its resources by tag regardless
+  boot-cleanup:
+    needs: ami
+    if: always() && needs.ami.result != 'skipped'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: |
+          tag="Name=tag:natkit.io/boot-test,Values=run-${{ github.run_id }}-arm64,run-${{ github.run_id }}-amd64"
+          ids=$(aws ec2 describe-instances --output text --query 'Reservations[].Instances[].InstanceId' \
+            --filters "$tag" Name=instance-state-name,Values=pending,running,stopping,stopped,shutting-down)
+          if [ -n "$ids" ]; then
+            echo "terminating $ids"
+            aws ec2 terminate-instances --instance-ids $ids >/dev/null
+            aws ec2 wait instance-terminated --instance-ids $ids
+          fi
+          for e in $(aws ec2 describe-network-interfaces --output text --query 'NetworkInterfaces[].NetworkInterfaceId' --filters "$tag"); do
+            echo "deleting $e"
+            aws ec2 delete-network-interface --network-interface-id "$e"
+          done
+          for a in $(aws ec2 describe-addresses --output text --query 'Addresses[].AllocationId' --filters "$tag"); do
+            echo "releasing $a"
+            aws ec2 release-address --allocation-id "$a"
+          done
+          for arch in arm64 amd64; do
+            aws ssm delete-parameter --name "/natkit/boot-test/run-${{ github.run_id }}-$arch/cwagent" 2>/dev/null || true
+          done
+
+  release:
+    needs: [kernel, ami]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: |
+          version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)
+          prev=$(gh release list --json tagName --jq "[.[].tagName | select(. != \"$TAG\")][0] // empty")
+          {
+            for arch in arm64 amd64; do
+              ami=$(aws ec2 describe-images --owners self --filters "Name=name,Values=natkit-$TAG-$arch" --query 'Images[0].ImageId' --output text)
+              echo "- $arch: AMI \`$ami\` (natkit-$TAG-$arch, ${{ vars.AWS_REGION }})"
+            done
+            echo
+            echo "Kernel $version, boot-tested (EIP, static ENI failover, NAT64 module, CloudWatch agent)."
+            echo
+            gh api "repos/$GH_REPO/releases/generate-notes" -f tag_name="$TAG" ${prev:+-f previous_tag_name="$prev"} --jq .body
+          } >notes.md
+          gh release edit "$TAG" --notes-file notes.md 2>/dev/null ||
+            gh release create "$TAG" --title "$TAG" --verify-tag --notes-file notes.md

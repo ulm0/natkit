@@ -1,0 +1,7 @@
+bin/
+out/
+init-image
+kernel/.build/
+kernel/config-*
+test/.user-data.yaml
+.DS_Store

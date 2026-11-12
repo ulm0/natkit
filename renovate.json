@@ -1,0 +1,72 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "kernel version: natkit.yml (what CI builds), Makefile and kernel/build.sh defaults",
+      "managerFilePatterns": [
+        "/^natkit\\.yml$/",
+        "/^Makefile$/",
+        "/^kernel/build\\.sh$/"
+      ],
+      "matchStrings": [
+        "ghcr\\.io/ulm0/natkit/(?:kernel|jool):(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "KERNEL_VERSION \\?= (?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "KERNEL_VERSION=\\$\\{1:-(?<currentValue>\\d+\\.\\d+\\.\\d+)\\}"
+      ],
+      "depNameTemplate": "linux",
+      "packageNameTemplate": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
+      "datasourceTemplate": "git-tags",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Alpine in the Makefile (init/Dockerfile's is Renovate's dockerfile manager)",
+      "managerFilePatterns": [
+        "/^Makefile$/"
+      ],
+      "matchStrings": [
+        "ALPINE := (?<depName>alpine):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "CloudWatch agent, pulled at boot",
+      "managerFilePatterns": [
+        "/^init/natkit-cwagent$/"
+      ],
+      "matchStrings": [
+        "IMAGE=(?<depName>public\\.ecr\\.aws/cloudwatch-agent/cloudwatch-agent):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)b(?<build>\\d+)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "the kernel stays on its LTS series; a new series is a deliberate change (kernel config review, Jool support)",
+      "matchDepNames": [
+        "linux"
+      ],
+      "allowedVersions": "/^6\\.18\\./"
+    },
+    {
+      "description": "Alpine: init image and Makefile together",
+      "matchDepNames": [
+        "alpine"
+      ],
+      "groupName": "alpine"
+    },
+    {
+      "description": "Jool: the version and checksum live in init/Dockerfile and kernel/jool.Dockerfile, bumped by hand together",
+      "matchDepNames": [
+        "NICMx/Jool"
+      ],
+      "enabled": false
+    }
+  ]
+}

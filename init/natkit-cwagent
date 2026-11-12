@@ -1,0 +1,23 @@
+#!/bin/sh
+# natkit-cwagent (service): the CloudWatch agent, only when natkit-init wrote its config (user-data cwagent_enabled).
+# Not in the image: it would sit in RAM (~150+ MB unpacked) on every NAT instance. Pulled by digest through the
+# system containerd (the host's ctr, bound in) into its own namespace, run in the host network with the config at
+# /etc/cwagentconfig, the agent image's container config directory. Restarted if it exits.
+set -u
+CONF=/run/natkit/cwagent
+IMAGE=public.ecr.aws/cloudwatch-agent/cloudwatch-agent:1.300074.1b2005@sha256:f6ce19de7f57fe9c536eb01dbebfb4c997fa053fa891d02711858642dda8a3f4
+ctr() { /usr/bin/ctr -n natkit "$@"; }
+
+[ -f "$CONF/cwagentconfig.json" ] || { echo "natkit-cwagent: not enabled"; exit 0; }
+
+until ctr image pull "$IMAGE" >/dev/null; do
+	echo "natkit-cwagent: pull failed, retrying" >&2
+	sleep 10
+done
+while :; do
+	ctr task kill -s KILL cwagent 2>/dev/null
+	ctr container rm cwagent 2>/dev/null
+	ctr run --rm --net-host --mount "type=bind,src=$CONF,dst=/etc/cwagentconfig,options=rbind:ro" "$IMAGE" cwagent
+	echo "natkit-cwagent: agent exited ($?), restarting" >&2
+	sleep 10
+done

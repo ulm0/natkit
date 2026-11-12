@@ -1,0 +1,107 @@
+kernel:
+  # kernel/natkit.config + LinuxKit's kernel packaging: `make kernel`, or pulled from GHCR (CI builds it).
+  # A multi-arch tag (arm64, amd64): linuxkit build --arch picks the platform.
+  image: ghcr.io/ulm0/natkit/kernel:6.18.62
+  # SPCR only gives earlycon; console=ttyS0 registers the real console, or userspace logs nothing to the serial
+  # port. EBS volumes must never time out (AWS's recommended nvme_core.io_timeout).
+  cmdline: "console=ttyS0,115200n8 earlycon nvme_core.io_timeout=4294967295"
+init:
+  - linuxkit/init:1c3e4933ceabd7418b961d66d5d884bf0044ac64
+  - linuxkit/runc:9442aa234715e751a16144f1d4ae3fd1a00fd492
+  - linuxkit/containerd:eb5daf20704109ea58abb38d2b808e0c3a7e3717
+  - linuxkit/ca-certificates:256f1950df59f2f209e9f0b81374177409eb11de
+  # service and onboot output to an in-memory ring (no disk to write logs to). From the getty:
+  # /proc/1/root/usr/bin/logread -F
+  - linuxkit/memlogd:19b0fdec83dded95e0a2f97a8ca6868f5e83c401
+  # Jool's NAT64 modules for this kernel, at /lib/modules/<release>/extra (kernel/jool.sh; same tag as the kernel)
+  - ghcr.io/ulm0/natkit/jool:6.18.62
+onboot:
+  - name: sysctl # linuxkit's defaults + etc/natkit/sysctl.conf (forwarding); user-data tuning is natkit-init's
+    image: linuxkit/sysctl:43ac1d39da329c3567fcb9689e5ca99de6d169b6
+    binds.add:
+      - /etc/natkit/sysctl.conf:/etc/sysctl.d/90-natkit.conf
+  - name: dhcpcd
+    image: linuxkit/dhcpcd:b87e9ececac55a65eaa592f4dd8b4e0c3009afdb
+    command: ["/sbin/dhcpcd", "--nobackground", "-f", "/dhcpcd.conf", "-1"]
+  # IMDSv2 user-data -> EIP, static ENI, nftables masquerade, tuning, NAT64, CloudWatch agent config
+  # (init/natkit-init). Its result goes to the serial console as one line.
+  - name: natkit-init
+    image: ghcr.io/ulm0/natkit/init:latest # init/; `make init-image` builds it locally
+    capabilities:
+      - all
+    net: host
+    binds:
+      - /run:/run
+      - /lib/modules:/lib/modules:ro
+      - /sys:/sys
+    devices:
+      - path: /dev/console
+        type: c
+        major: 5
+        minor: 1
+        mode: "0600"
+services:
+  # root login on ttyS0 for the EC2 Serial Console (off per account, gated by IAM). The password hash comes from
+  # user-data console_password (SSM); without it root is locked.
+  - name: getty
+    image: linuxkit/getty:a86d74c8f89be8956330c3b115b0b1f2e09ef6e0
+    binds.add:
+      - /run/natkit/getty.shadow:/hostroot/etc/getty.shadow
+  # also brings up a static ENI that natkit-init attaches after boot (hotplug)
+  - name: dhcpcd
+    image: linuxkit/dhcpcd:b87e9ececac55a65eaa592f4dd8b4e0c3009afdb
+  - name: acpid # instance stop/terminate: ACPI power button -> poweroff
+    image: linuxkit/acpid:dbd30b25903bf17042c22171b729f94c4bd3d98d
+    binds.add:
+      - /etc/acpi/PWRF:/etc/acpi/PWRF
+  - name: rngd
+    image: linuxkit/rngd:984eb580ecb63986f07f626b61692a97aacd7198
+  - name: ntpd # Amazon Time Sync Service, link-local
+    image: linuxkit/openntpd:2508f1d040441457a0b3e75744878afdf61bc473
+    binds.add:
+      - /etc/natkit/ntpd.conf:/etc/ntpd.conf
+  # CloudWatch agent, only with user-data cwagent_enabled: pulled by digest at boot through the system containerd
+  # and run in the host network (init/natkit-cwagent). Otherwise it exits at once and costs no memory.
+  - name: cwagent
+    image: ghcr.io/ulm0/natkit/init:latest
+    capabilities:
+      - all
+    net: host
+    binds:
+      - /run:/run
+      - /usr/bin/ctr:/usr/bin/ctr:ro
+    command: ["/usr/bin/natkit-cwagent"]
+files:
+  - path: etc/linuxkit.yml
+    metadata: yaml
+  # the getty's bind target (/hostroot is read-only there, so the file must exist): a locked root, replaced by
+  # natkit-init's /run/natkit/getty.shadow
+  - path: etc/getty.shadow
+    mode: "0600"
+    contents: |
+      root:*::0:99999:7:::
+  - path: etc/os-release
+    mode: "0644"
+    contents: |
+      NAME="natkit"
+      ID="natkit"
+      PRETTY_NAME="natkit"
+      HOME_URL="https://github.com/ulm0/natkit"
+  - path: etc/acpi/PWRF/00000080
+    mode: "0755"
+    contents: |
+      #!/bin/sh
+      exec /sbin/poweroff
+  # a NAT forwards between interfaces; strict reverse-path filtering would drop traffic from the private subnets
+  # arriving on a second ENI. IPv6 router advertisements are dhcpcd's (in userspace), so forwarding doesn't stop them.
+  - path: etc/natkit/sysctl.conf
+    mode: "0644"
+    contents: |
+      net.ipv4.ip_forward = 1
+      net.ipv6.conf.all.forwarding = 1
+      net.ipv4.conf.all.rp_filter = 0
+      net.ipv4.conf.default.rp_filter = 0
+  - path: etc/natkit/ntpd.conf
+    mode: "0644"
+    contents: |
+      server 169.254.169.123
