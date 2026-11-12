@@ -6,7 +6,7 @@ RUN apk add --no-cache build-base argp-standalone bsd-compat-headers libnl3-dev 
 RUN curl -fsSLo /jool.tgz https://github.com/NICMx/Jool/releases/download/v$JOOL_VERSION/jool-$JOOL_VERSION.tar.gz && \
 	echo "$JOOL_SHA256  /jool.tgz" | sha256sum -c - && tar xzf /jool.tgz -C / && cd /jool-$JOOL_VERSION && \
 	./configure --prefix=/usr --disable-shared --with-xtables=no >/dev/null && \
-	make -C src/usr >/dev/null && make -C src/usr install DESTDIR=/out >/dev/null
+	make -s && make -s install DESTDIR=/out
 
 FROM alpine:3.24@sha256:3f4d6b32e26703c6082839234f43769d5046b3ac7c910033911d1e71d8cd630a
 # curl --aws-sigv4 signs the EC2 and SSM calls: no aws-cli (~100 MB) in an image that lives in RAM
