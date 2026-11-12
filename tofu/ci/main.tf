@@ -167,6 +167,9 @@ resource "aws_iam_role_policy" "github" {
       { Sid = "TestParameters", Effect = "Allow", Action = ["ssm:PutParameter", "ssm:DeleteParameter"], Resource = "${local.arn}:ssm:${local.region}:${local.account}:parameter/natkit/boot-test/*" },
       { Sid = "PublicAmiParameters", Effect = "Allow", Action = "ssm:GetParameter", Resource = "${local.arn}:ssm:${local.region}::parameter/aws/service/ami-amazon-linux-latest/*" },
       { Sid = "AgentMetrics", Effect = "Allow", Action = "cloudwatch:GetMetricStatistics", Resource = "*" },
+      # ImportSnapshot passes the vmimport service role (created outside this module) to VM Import/Export; no
+      # iam:PassedToService condition: VM Import calls on the caller's behalf and some condition keys don't survive
+      { Sid = "PassVmImportRole", Effect = "Allow", Action = "iam:PassRole", Resource = "${local.arn}:iam::${local.account}:role/vmimport" },
       # only the test profile's role, only to EC2
       {
         Sid       = "PassTestRole"
