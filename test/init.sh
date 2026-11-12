@@ -16,9 +16,11 @@ run() {
 	docker run -d --name natkit-mock --network "$NET" -v "$PWD/test/mock.py:/mock.py:ro" \
 		${1:+-v "$PWD/test/.user-data.yaml:/user-data:ro"} python:3.13-alpine python /mock.py >/dev/null
 	sleep 1
-	docker run --rm --privileged --network "$NET" --mac-address 02:42:ac:11:00:99 \
-		-e NATKIT_IMDS=http://natkit-mock:8080/latest -e NATKIT_EC2=http://natkit-mock:8080/ \
-		-e NATKIT_SSM=http://natkit-mock:8080/ -e NATKIT_CONSOLE=/tmp/console \
+	# by IP: natkit-init's `flush ruleset` also removes docker's embedded-DNS rules in this container
+	mock=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' natkit-mock)
+	docker run --rm --privileged --network "$NET" --mac-address 02:42:ac:11:00:99 -e "MOCK=$mock" \
+		-e "NATKIT_IMDS=http://$mock:8080/latest" -e "NATKIT_EC2=http://$mock:8080/" \
+		-e "NATKIT_SSM=http://$mock:8080/" -e NATKIT_CONSOLE=/tmp/console \
 		--entrypoint /bin/sh "$IMG" -c "set -e; $2"
 }
 # fails <user-data> <console reason>: natkit-init must exit non-zero and put the reason on the console
@@ -26,7 +28,7 @@ fails() {
 	run "$1" "if natkit-init >/dev/null 2>&1; then exit 1; fi; grep -qF 'natkit: FAIL $2' /tmp/console" ||
 		{ echo "FAIL: not refused with '$2': $1"; exit 1; }
 }
-calls='curl -fsS http://natkit-mock:8080/_calls'
+calls='curl -fsS http://$MOCK:8080/_calls' # $MOCK: expanded in the container
 
 echo "== no user-data: masquerade out of eth0, nothing else"
 run "" "natkit-init
