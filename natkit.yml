@@ -73,10 +73,12 @@ services:
     net: host
     # CAP_SYS_ADMIN and containerd's snapshots: `ctr run` mounts the image's rootfs in this (its own) mount
     # namespace to read /etc/group (containerd's WithAdditionalGIDs). The containerd socket is root-equivalent anyway.
+    # All of /run/containerd, not just the socket: ctr makes the task's stdio FIFOs in /run/containerd/fifo, where
+    # containerd's shim (in the host's mount namespace) opens them.
     capabilities:
       - CAP_SYS_ADMIN
     binds:
-      - /run/containerd/containerd.sock:/run/containerd/containerd.sock
+      - /run/containerd:/run/containerd
       - /var/lib/containerd:/var/lib/containerd:ro
       - /run/natkit:/run/natkit:ro
       - /usr/bin/ctr:/usr/bin/ctr:ro
