@@ -46,8 +46,13 @@ done
 echo "snapshot $snap" >&2
 
 tags="{Key=Name,Value=$NAME}"
-for t in "$@"; do tags="$tags,{Key=${t%%=*},Value=${t#*=}}"; done
-aws ec2 create-tags --resources "$snap" --tags "Key=Name,Value=$NAME" >/dev/null
+snaptags="Key=Name,Value=$NAME"
+for t in "$@"; do
+	tags="$tags,{Key=${t%%=*},Value=${t#*=}}"
+	snaptags="$snaptags Key=${t%%=*},Value=${t#*=}"
+done
+# shellcheck disable=SC2086 # one word per tag; boot-cleanup prunes snapshots by natkit.io/release
+aws ec2 create-tags --resources "$snap" --tags $snaptags >/dev/null
 aws ec2 register-image --name "$NAME" --description "natkit: LinuxKit NAT instance ($NAME)" \
 	--architecture "$EC2_ARCH" --boot-mode uefi --ena-support --imds-support v2.0 \
 	--virtualization-type hvm --root-device-name /dev/xvda \
