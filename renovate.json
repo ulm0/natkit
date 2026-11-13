@@ -6,21 +6,17 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "kernel version: natkit.yml (what CI builds), Makefile and kernel/build.sh defaults",
+      "description": "the kernel (github.com/ulm0/lk-kernel, by version and digest) and the Jool modules tagged with its version, in one PR",
       "managerFilePatterns": [
-        "/^natkit\\.yml$/",
-        "/^Makefile$/",
-        "/^kernel/build\\.sh$/"
+        "/^natkit\\.yml$/"
       ],
       "matchStrings": [
-        "ghcr\\.io/ulm0/natkit/(?:kernel|jool):(?<currentValue>\\d+\\.\\d+\\.\\d+)",
-        "KERNEL_VERSION \\?= (?<currentValue>\\d+\\.\\d+\\.\\d+)",
-        "KERNEL_VERSION=\\$\\{1:-(?<currentValue>\\d+\\.\\d+\\.\\d+)\\}"
+        "image: ghcr\\.io/ulm0/lk-kernel:(?<currentValue>\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[a-f0-9]+)",
+        "- ghcr\\.io/ulm0/natkit/jool:(?<currentValue>\\d+\\.\\d+\\.\\d+)\\n"
       ],
-      "depNameTemplate": "linux",
-      "packageNameTemplate": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
-      "datasourceTemplate": "git-tags",
-      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+      "depNameTemplate": "ghcr.io/ulm0/lk-kernel",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
     },
     {
       "customType": "regex",
@@ -50,7 +46,7 @@
     {
       "description": "the kernel stays on its LTS series; a new series is a deliberate change (kernel config review, Jool support)",
       "matchDepNames": [
-        "linux"
+        "ghcr.io/ulm0/lk-kernel"
       ],
       "allowedVersions": "/^6\\.18\\./"
     },
@@ -62,7 +58,7 @@
       "groupName": "alpine"
     },
     {
-      "description": "Jool: the version and checksum live in init/Dockerfile and kernel/jool.Dockerfile, bumped by hand together",
+      "description": "Jool: the version and checksum live in init/Dockerfile and jool/Dockerfile, bumped by hand together",
       "matchDepNames": [
         "NICMx/Jool"
       ],

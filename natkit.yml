@@ -1,7 +1,8 @@
 kernel:
-  # kernel/natkit.config + LinuxKit's kernel packaging: `make kernel`, or pulled from GHCR (CI builds it).
-  # A multi-arch tag (arm64, amd64): linuxkit build --arch picks the platform.
-  image: ghcr.io/ulm0/natkit/kernel:6.18.62
+  # github.com/ulm0/lk-kernel (one kernel for natkit, yagan and limakit), pinned by digest: a new build
+  # there reaches natkit only through a (Renovate) PR here. Multi-arch (arm64, amd64): linuxkit build --arch
+  # picks the platform.
+  image: ghcr.io/ulm0/lk-kernel:6.18.62@sha256:c36c1f0fcd86535245202d9ae798afbfe2d8832e3e6d14792f5c3071cb55afe5
   # SPCR only gives earlycon; console=ttyS0 registers the real console, or userspace logs nothing to the serial
   # port. EBS volumes must never time out (AWS's recommended nvme_core.io_timeout).
   cmdline: "console=ttyS0,115200n8 earlycon nvme_core.io_timeout=4294967295"
@@ -13,7 +14,7 @@ init:
   # service and onboot output to an in-memory ring (no disk to write logs to). From the getty:
   # /proc/1/root/usr/bin/logread -F
   - linuxkit/memlogd:19b0fdec83dded95e0a2f97a8ca6868f5e83c401@sha256:c472c63a2164b7cc334199c4e38d58c4f3b574a3ffe3cc314bfead96b8688505
-  # Jool's NAT64 modules for this kernel, at /lib/modules/<release>/extra (kernel/jool.sh; same tag as the kernel)
+  # Jool's NAT64 modules for this kernel, at /lib/modules/<release>/extra (jool/jool.sh; the kernel's version)
   - ghcr.io/ulm0/natkit/jool:6.18.62
 onboot:
   - name: sysctl # linuxkit's defaults + etc/natkit/sysctl.conf (forwarding); user-data tuning is natkit-init's

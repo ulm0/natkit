@@ -1,6 +1,6 @@
 # Builds natively on GitHub's arm64 and x64 runners, one matrix leg per architecture:
-#   kernel  kernel:<ver>-<hash>-<arch> + jool:<ver>-<hash>-<arch> (rebuilt only when kernel/ changes); on main,
-#           the multi-arch kernel:<ver> and jool:<ver> that natkit.yml names
+#   jool    Jool's modules for the kernel natkit.yml pins (github.com/ulm0/lk-kernel): jool:<ver>-<key>-<arch>, rebuilt
+#           only when that kernel or jool/ changes; on main, the multi-arch jool:<ver> that natkit.yml names
 #   image   init image tested against a mock IMDS/EC2/SSM (test/init.sh); out/natkit-<arch>-efi.img as an artifact;
 #           init:<sha>, :latest (main), :<tag> (multi-arch)
 #   ami     on v* tags or a manual run: a UEFI AMI per arch named natkit-<tag|sha>-<arch>, tagged natkit.io/release
@@ -30,60 +30,45 @@ env:
   REGISTRY: ghcr.io/ulm0/natkit # what natkit.yml references
 
 jobs:
-  kernel:
+  jool:
     strategy:
       matrix:
         include:
           - { arch: arm64, runner: ubuntu-26.04-arm }
           - { arch: amd64, runner: ubuntu-26.04 }
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: bin
-          key: linuxkit-${{ runner.arch }}-${{ hashFiles('Makefile') }}
-          restore-keys: linuxkit-${{ runner.arch }}-
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: key # the kernel version natkit.yml uses + a hash of what the kernel and Jool builds depend on
+      - id: key # the kernel's version + a hash of its digest and jool/
         run: |
-          version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)
-          hash=$(cat kernel/*.config kernel/*.sh kernel/jool.Dockerfile | sha256sum | cut -c1-12)
-          echo "tag=$version-$hash-${{ matrix.arch }}" >>"$GITHUB_OUTPUT"
-          echo "version=$version" >>"$GITHUB_OUTPUT"
+          kernel=$(sed -n 's|^  image: \(ghcr.io/ulm0/lk-kernel:.*\)$|\1|p' natkit.yml)
+          version=$(echo "$kernel" | sed 's|.*:\([0-9.]*\)@.*|\1|')
+          hash=$({ echo "$kernel"; cat jool/*; } | sha256sum | cut -c1-12)
+          { echo "version=$version"; echo "image=$REGISTRY/jool:$version-$hash-${{ matrix.arch }}"; } >>"$GITHUB_OUTPUT"
       - id: cached
-        run: |
-          docker manifest inspect "$REGISTRY/kernel:${{ steps.key.outputs.tag }}" >/dev/null 2>&1 &&
-            docker manifest inspect "$REGISTRY/jool:${{ steps.key.outputs.tag }}" >/dev/null 2>&1 && echo hit=true >>"$GITHUB_OUTPUT" || true
+        run: docker manifest inspect "${{ steps.key.outputs.image }}" >/dev/null 2>&1 && echo hit=true >>"$GITHUB_OUTPUT" || true
       - if: steps.cached.outputs.hit != 'true'
         run: |
-          make kernel KERNEL_VERSION=${{ steps.key.outputs.version }}
-          for i in kernel jool; do
-            # the label records the commit that built it (on a PR, its head commit: github.sha is the merge commit)
-            echo "FROM $REGISTRY/$i:${{ steps.key.outputs.version }}" | docker build -q -t "$REGISTRY/$i:${{ steps.key.outputs.tag }}" \
-              --label org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }} \
-              --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }} -
-            # a fork's PR has a read-only token: its kernel is only built here, and again in the image job
-            [ "${{ github.event.pull_request.head.repo.fork }}" = true ] || docker push "$REGISTRY/$i:${{ steps.key.outputs.tag }}"
-          done
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always() && steps.cached.outputs.hit != 'true'
-        with:
-          name: kernel-config-${{ matrix.arch }}
-          path: kernel/config-*
-          if-no-files-found: ignore
+          make jool
+          # the label records the commit that built it (on a PR, its head commit: github.sha is the merge commit)
+          echo "FROM $REGISTRY/jool:${{ steps.key.outputs.version }}" | docker build -q -t "${{ steps.key.outputs.image }}" \
+            --label org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }} \
+            --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }} -
+          # a fork's PR has a read-only token: its modules are only built here, and again in the image job
+          [ "${{ github.event.pull_request.head.repo.fork }}" = true ] || docker push "${{ steps.key.outputs.image }}"
 
-  # main: kernel:<ver> and jool:<ver>, multi-arch, move to this build
-  kernel-manifest:
-    needs: kernel
+  # main: jool:<ver>, multi-arch, moves to this build
+  jool-manifest:
+    needs: jool
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
@@ -98,15 +83,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: |
-          version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)
-          hash=$(cat kernel/*.config kernel/*.sh kernel/jool.Dockerfile | sha256sum | cut -c1-12)
-          for i in kernel jool; do
-            docker buildx imagetools create -t "$REGISTRY/$i:$version" -t "$REGISTRY/$i:$version-$hash" \
-              "$REGISTRY/$i:$version-$hash-arm64" "$REGISTRY/$i:$version-$hash-amd64"
-          done
+          kernel=$(sed -n 's|^  image: \(ghcr.io/ulm0/lk-kernel:.*\)$|\1|p' natkit.yml)
+          version=$(echo "$kernel" | sed 's|.*:\([0-9.]*\)@.*|\1|')
+          hash=$({ echo "$kernel"; cat jool/*; } | sha256sum | cut -c1-12)
+          docker buildx imagetools create -t "$REGISTRY/jool:$version" -t "$REGISTRY/jool:$version-$hash" \
+            "$REGISTRY/jool:$version-$hash-arm64" "$REGISTRY/jool:$version-$hash-amd64"
 
   image:
-    needs: kernel
+    needs: jool
     strategy:
       matrix:
         include:
@@ -124,22 +108,21 @@ jobs:
           path: bin
           key: linuxkit-${{ runner.arch }}-${{ hashFiles('Makefile') }}
           restore-keys: linuxkit-${{ runner.arch }}-
-      - run: shellcheck -S warning init/natkit-init init/natkit-cwagent kernel/build.sh kernel/jool.sh scripts/*.sh test/init.sh
+      - run: shellcheck -S warning init/natkit-init init/natkit-cwagent jool/jool.sh scripts/*.sh test/init.sh
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: make test
-      - name: this commit's kernel and Jool modules, under the names natkit.yml uses
+      - name: this commit's Jool modules, under the name natkit.yml uses (linuxkit pulls the pinned kernel)
         run: |
-          version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)
-          hash=$(cat kernel/*.config kernel/*.sh kernel/jool.Dockerfile | sha256sum | cut -c1-12)
-          # not in the registry: a fork's PR that changes kernel/ (it can't push). Build it here then.
-          for i in kernel jool; do
-            docker pull "$REGISTRY/$i:$version-$hash-${{ matrix.arch }}" &&
-              docker tag "$REGISTRY/$i:$version-$hash-${{ matrix.arch }}" "$REGISTRY/$i:$version"
-          done || make kernel KERNEL_VERSION="$version"
+          kernel=$(sed -n 's|^  image: \(ghcr.io/ulm0/lk-kernel:.*\)$|\1|p' natkit.yml)
+          version=$(echo "$kernel" | sed 's|.*:\([0-9.]*\)@.*|\1|')
+          hash=$({ echo "$kernel"; cat jool/*; } | sha256sum | cut -c1-12)
+          # not in the registry: a fork's PR that changes the kernel or jool/ (it can't push). Build it here then.
+          { docker pull "$REGISTRY/jool:$version-$hash-${{ matrix.arch }}" &&
+            docker tag "$REGISTRY/jool:$version-$hash-${{ matrix.arch }}" "$REGISTRY/jool:$version"; } || make jool
       - run: make ARCH=${{ matrix.arch }}
       - run: cd out && sha256sum natkit-${{ matrix.arch }}-efi.img | tee SHA256SUMS-${{ matrix.arch }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -252,7 +235,7 @@ jobs:
           done
 
   release:
-    needs: [kernel, ami]
+    needs: [jool, ami]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
@@ -271,7 +254,7 @@ jobs:
           mask-aws-account-id: true
           aws-region: ${{ vars.AWS_REGION }}
       - run: |
-          version=$(sed -n 's|^  image: ghcr.io/ulm0/natkit/kernel:\(.*\)$|\1|p' natkit.yml)
+          version=$(sed -n 's|^  image: ghcr.io/ulm0/lk-kernel:\([0-9.]*\)@.*$|\1|p' natkit.yml)
           prev=$(gh release list --json tagName --jq "[.[].tagName | select(. != \"$TAG\")][0] // empty")
           {
             for arch in arm64 amd64; do
