@@ -38,3 +38,7 @@ featureGrid:
     - title: OpenTofu module
       icon: deployed_code
       description: tofu/nat sets up the instance, ENI, EIP, routes and a scoped instance role.
+
+# the theme ships this demo section; its data merges with ours unless turned off
+imageCompare:
+  enable: false
