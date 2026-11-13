@@ -18,6 +18,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      boot_test:
+        description: "Run the EC2 boot test after registering the AMIs (off: just the AMIs, e.g. to boot-test from a laptop)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -191,6 +196,7 @@ jobs:
           echo "ami=$ami" >>"$GITHUB_OUTPUT"
           echo "### AMI \`$ami\` ($name, $AWS_REGION)" >>"$GITHUB_STEP_SUMMARY"
       - name: boot test (EIP, static ENI, client egress, failover, CloudWatch agent)
+        if: github.event_name != 'workflow_dispatch' || inputs.boot_test
         run: scripts/boot-test.sh ${{ steps.ami.outputs.ami }} ${{ matrix.arch }}
         env:
           NATKIT_TEST_PUBLIC_SUBNET: ${{ vars.NATKIT_TEST_PUBLIC_SUBNET }}

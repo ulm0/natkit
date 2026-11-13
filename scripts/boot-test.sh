@@ -22,6 +22,8 @@
 #   NATKIT_TEST_INSTANCE_PROFILE     NAT role: ec2:AssociateAddress, ec2:AttachNetworkInterface,
 #                                    ec2:ModifyNetworkInterfaceAttribute, ssm:GetParameter, CloudWatchAgentServerPolicy
 # Both subnets' instances use the VPC's default security group (admits traffic from itself).
+# Runs on Linux (CI) or macOS: e.g. against the AMIs of a `build` run dispatched with boot_test off, with
+# NATKIT_BOOT_TEST_TAG set to something unique. One at a time: every run routes the private subnet through its ENI.
 set -eu
 AMI=$1 ARCH=$2
 TAG=${NATKIT_BOOT_TEST_TAG:-$AMI}
@@ -56,6 +58,8 @@ cleanup() {
 }
 trap cleanup EXIT
 die() { echo "boot test: $*" >&2; exit 1; }
+# ago <seconds>: that long ago in UTC, ISO 8601; GNU date (CI) or BSD date (macOS, to run the test locally)
+ago() { t=$(($(date +%s) - $1)); date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ; }
 
 # console <instance>: its serial console output; line <instance> <pattern>: the last matching line, waiting up to 15 min
 console() { aws ec2 get-console-output --instance-id "$1" --latest --query Output --output text 2>/dev/null; }
@@ -177,7 +181,7 @@ for _ in $(seq 40); do
 	sleep 15
 	c=$(aws cloudwatch get-metric-statistics --namespace "$NS" --metric-name mem_used_percent \
 		--dimensions "Name=InstanceId,Value=$b" --statistics Maximum --period 60 \
-		--start-time "$(date -u -d '-15 min' +%Y-%m-%dT%H:%M:%SZ)" --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		--start-time "$(ago 900)" --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		--query 'length(Datapoints)' --output text)
 	[ "$c" -gt 0 ] && echo "B: CloudWatch agent published $c datapoint(s)" && break
 	c=0
