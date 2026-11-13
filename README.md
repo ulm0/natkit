@@ -104,7 +104,8 @@ in memory: use at least a `t4g.micro`/`t3.micro` with it.
   syscalls), CPU mitigations, KASLR, stack protector, hardened usercopy, zeroed allocations. Module loading is
   disabled once Jool is in.
 - No ICMP redirects or source routing; unprivileged BPF and kernel log access are off.
-- `natkit-init` runs with three capabilities; the CloudWatch agent launcher with none.
+- `natkit-init` runs with three capabilities; the CloudWatch agent launcher with `CAP_SYS_ADMIN` only (`ctr run`
+  mounts the agent image's rootfs; its containerd socket is root-equivalent anyway).
 - Images are pinned by digest or content hash; the Jool source by checksum. IMDSv2 only.
 
 ## Building
