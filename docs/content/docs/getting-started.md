@@ -25,9 +25,12 @@ Without user-data, natkit is a plain NAT out of the primary ENI. For the HA layo
 
 ## Instance size
 
-The CloudWatch agent needs at least a `t4g.micro` or `t3.micro`. Boots are tested on those two types.
+| Architecture | Minimum | With the CloudWatch agent |
+|---|---|---|
+| arm64 | `t4g.micro` | `t4g.micro` |
+| amd64 | `t3.nano` | `t3.micro` |
 
-{{< alert context="warning" text="`t4g.nano` does not boot yet: the in-memory image does not fit in 512 MB." />}}
+{{< alert context="warning" text="`t4g.nano` is not supported. Its UEFI often can't find room for natkit's in-memory image next to the kernel, and the boot stops with `EFI stub: ERROR: Failed to load initrd`. Disabling KASLR would make room, at the cost of hardening on every arm64 instance." />}}
 
 ## Check that it's up
 

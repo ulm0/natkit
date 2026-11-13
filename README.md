@@ -94,6 +94,10 @@ where you can.
 The CloudWatch agent image (~150 MB unpacked) is pulled from `public.ecr.aws` through the NAT's own egress and kept
 in memory: use at least a `t4g.micro`/`t3.micro` with it.
 
+Instance size: at least `t4g.micro` on arm64 and `t3.nano` on amd64. `t4g.nano` is not supported: its UEFI often
+can't fit natkit's in-memory image next to the randomly placed (KASLR) kernel (`EFI stub: ERROR: Failed to load
+initrd`).
+
 ## Hardening
 
 - No SSH, SSM agent or package manager; the only login is the EC2 Serial Console, locked unless `console_password`

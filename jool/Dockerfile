@@ -1,5 +1,6 @@
 # Jool's NAT64 kernel modules for one natkit kernel (lk-kernel), as a LinuxKit init image: /lib/modules/<release>/extra/*.ko,
-# merged into the root filesystem. Built against the kernel image's kernel-dev.tar (headers, .config,
+# merged into the root filesystem. Stripped of debug info (as INSTALL_MOD_STRIP=1): unstripped, jool_common.ko is
+# 23 MB of RAM. Built against the kernel image's kernel-dev.tar (headers, .config,
 # Module.symvers, host tools) in the kernel's own builder image (same compiler). jool/jool.sh runs it.
 ARG KERNEL_IMAGE
 ARG BUILD_IMAGE
@@ -17,7 +18,8 @@ RUN tar xf /kernel-dev.tar -C / && \
 	make -C /jool-$JOOL_VERSION/src/mod/common KERNEL_DIR="$1" && \
 	make -C /jool-$JOOL_VERSION/src/mod/nat64 KERNEL_DIR="$1" && \
 	mkdir -p /out/lib/modules/$rel/extra && \
-	cp /jool-$JOOL_VERSION/src/mod/common/jool_common.ko /jool-$JOOL_VERSION/src/mod/nat64/jool.ko /out/lib/modules/$rel/extra/
+	cp /jool-$JOOL_VERSION/src/mod/common/jool_common.ko /jool-$JOOL_VERSION/src/mod/nat64/jool.ko /out/lib/modules/$rel/extra/ && \
+	strip --strip-debug /out/lib/modules/$rel/extra/*.ko
 
 FROM scratch
 COPY --from=build /out/ /
