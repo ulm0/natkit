@@ -7,7 +7,7 @@ kernel:
   # port. EBS volumes must never time out (AWS's recommended nvme_core.io_timeout). rootfstype=ramfs: without it
   # the initramfs unpacks into a tmpfs capped at half the RAM, which the ~190 MB image overflows on a 512 MB
   # t3.nano ("Initramfs unpacking failed: write error"); linuxkit/init then copies it into a tmpfs anyway.
-  # (t4g.nano still doesn't boot: its UEFI often can't allocate the initrd. Not supported, see README.)
+  # (Nanos still aren't supported: their UEFI often can't allocate the initrd at all, see README.)
   cmdline: "console=ttyS0,115200n8 earlycon nvme_core.io_timeout=4294967295 rootfstype=ramfs"
 init:
   - linuxkit/init:1c3e4933ceabd7418b961d66d5d884bf0044ac64@sha256:46899610b7f12e7a63cf1da2b71b71e9242b4d68daee26542c31a9756ff2dd84

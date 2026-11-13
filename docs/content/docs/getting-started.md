@@ -13,6 +13,19 @@ natkit is a NAT instance AMI for AWS, built for arm64 and x86_64. It has [fck-na
 
 There's no package manager, SSH or SSM agent.
 
+## Get the AMI
+
+The AMIs aren't public. Import a [release](https://github.com/ulm0/natkit/releases)'s disk image into your own account and region, or [build it](../building/):
+
+```sh
+V=v0.1.1 ARCH=arm64 # or amd64
+curl -fsSLO "https://github.com/ulm0/natkit/releases/download/$V/natkit-$V-$ARCH-efi.img.gz"
+gunzip "natkit-$V-$ARCH-efi.img.gz"
+AWS_REGION=us-east-1 NATKIT_BUCKET=my-import-bucket scripts/ami.sh "natkit-$V-$ARCH-efi.img" $ARCH "natkit-$V-$ARCH"
+```
+
+[`scripts/ami.sh`](https://github.com/ulm0/natkit/blob/main/scripts/ami.sh) uploads the image to the bucket, imports it as a snapshot, registers the AMI and prints its ID. It needs the [`vmimport` service role](https://docs.aws.amazon.com/vm-import/latest/userguide/required-permissions.html).
+
 ## Launch
 
 1. Launch the AMI in a public subnet with a public IP. Pick `natkit-<version>-arm64` or `natkit-<version>-amd64` to match the instance type.
@@ -25,12 +38,14 @@ Without user-data, natkit is a plain NAT out of the primary ENI. For the HA layo
 
 ## Instance size
 
-| Architecture | Minimum | With the CloudWatch agent |
-|---|---|---|
-| arm64 | `t4g.micro` | `t4g.micro` |
-| amd64 | `t3.nano` | `t3.micro` |
+| Architecture | Minimum |
+|---|---|
+| arm64 | `t4g.micro` |
+| amd64 | `t3.micro` |
 
-{{< alert context="warning" text="`t4g.nano` is not supported. Its UEFI often can't find room for natkit's in-memory image next to the kernel, and the boot stops with `EFI stub: ERROR: Failed to load initrd`. Disabling KASLR would make room, at the cost of hardening on every arm64 instance." />}}
+natkit needs at least 1 GiB of memory, with or without the CloudWatch agent.
+
+{{< alert context="warning" text="The 0.5 GiB sizes (`t4g.nano`, `t3.nano`, `t3a.nano`) are not supported. Their UEFI often can't find room for natkit's in-memory image next to the kernel. The boot then hangs at `EFI stub: ERROR: Failed to load initrd`, and EC2 still reports the instance as running, so an Auto Scaling group doesn't replace it." />}}
 
 ## Check that it's up
 

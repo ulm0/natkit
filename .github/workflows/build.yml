@@ -255,7 +255,7 @@ jobs:
     needs: [jool, ami]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-26.04-arm
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: write
       id-token: write
@@ -270,13 +270,18 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           mask-aws-account-id: true
           aws-region: ${{ vars.AWS_REGION }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: natkit-*-${{ github.sha }}
+          path: out
+          merge-multiple: true
       - run: |
           version=$(sed -n 's|^  image: ghcr.io/ulm0/lk-kernel:\([0-9.]*\)@.*$|\1|p' natkit.yml)
           prev=$(gh release list --json tagName --jq "[.[].tagName | select(. != \"$TAG\")][0] // empty")
           {
             for arch in arm64 amd64; do
               ami=$(aws ec2 describe-images --owners self --filters "Name=name,Values=natkit-$TAG-$arch" --query 'Images[0].ImageId' --output text)
-              echo "- $arch: AMI \`$ami\` (natkit-$TAG-$arch, ${{ vars.AWS_REGION }})"
+              echo "- $arch: AMI \`$ami\` (natkit-$TAG-$arch, ${{ vars.AWS_REGION }}, private) or import \`natkit-$TAG-$arch-efi.img.gz\` below"
             done
             echo
             echo "Kernel $version, boot-tested (EIP, static ENI failover, NAT64 module, CloudWatch agent)."
@@ -285,3 +290,7 @@ jobs:
           } >notes.md
           gh release edit "$TAG" --notes-file notes.md 2>/dev/null ||
             gh release create "$TAG" --title "$TAG" --verify-tag --notes-file notes.md
+          # the AMIs are private to this account: the disk images are what anyone else imports (scripts/ami.sh)
+          for arch in arm64 amd64; do gzip -9 <"out/natkit-$arch-efi.img" >"natkit-$TAG-$arch-efi.img.gz"; done
+          sha256sum natkit-"$TAG"-*-efi.img.gz >SHA256SUMS
+          gh release upload "$TAG" --clobber natkit-"$TAG"-*-efi.img.gz SHA256SUMS
