@@ -5,6 +5,8 @@ A NAT instance AMI for AWS, arm64 and x86_64: [fck-nat](https://github.com/Andre
 in-memory image: a minimal kernel ([lk-kernel](https://github.com/ulm0/lk-kernel), shared with yagan and limakit), containerd, and a handful of service containers. There's no package
 manager, SSH or SSM agent.
 
+Docs: [natkit.ulm0.com](https://natkit.ulm0.com).
+
 | fck-nat | natkit |
 |---|---|
 | Amazon Linux 2023, systemd unit `fck-nat.service` | LinuxKit `onboot` container `natkit-init` |
