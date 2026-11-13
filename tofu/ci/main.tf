@@ -139,6 +139,14 @@ resource "aws_iam_role_policy" "github" {
         ]
         Resource = "*"
       },
+      # boot-cleanup prunes per-commit AMIs; only images/snapshots scripts/ami.sh tagged
+      {
+        Sid       = "PruneAmis"
+        Effect    = "Allow"
+        Action    = ["ec2:DeregisterImage", "ec2:DeleteSnapshot"]
+        Resource  = ["${local.arn}:ec2:${local.region}::image/*", "${local.arn}:ec2:${local.region}::snapshot/*"]
+        Condition = { StringLike = { "aws:ResourceTag/natkit.io/release" = "natkit-*" } }
+      },
       { Sid = "TestParameters", Effect = "Allow", Action = ["ssm:PutParameter", "ssm:DeleteParameter"], Resource = "${local.arn}:ssm:${local.region}:${local.account}:parameter/natkit/boot-test/*" },
       { Sid = "PublicAmiParameters", Effect = "Allow", Action = "ssm:GetParameter", Resource = "${local.arn}:ssm:${local.region}::parameter/aws/service/ami-amazon-linux-latest/*" },
       { Sid = "AgentMetrics", Effect = "Allow", Action = "cloudwatch:GetMetricStatistics", Resource = "*" },
