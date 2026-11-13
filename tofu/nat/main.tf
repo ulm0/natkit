@@ -35,8 +35,13 @@ variable "ami_id" {
   type        = string
 }
 variable "instance_type" {
-  type    = string
-  default = "t4g.nano"
+  description = "At least t4g.micro on arm64 (t4g.nano's UEFI often can't load the image), t3.nano on amd64; a micro with the CloudWatch agent."
+  type        = string
+  default     = "t4g.micro"
+  validation {
+    condition     = var.instance_type != "t4g.nano"
+    error_message = "t4g.nano is not supported: its UEFI often can't load natkit's image. Use t4g.micro or larger."
+  }
 }
 variable "eip" {
   description = "Allocate an EIP and have the instance take it. Otherwise it egresses from its own public IP, which changes on replacement."
