@@ -1,0 +1,54 @@
+baseURL = "https://natkit.ulm0.com/"
+languageCode = "en"
+title = "natkit"
+enableGitInfo = true
+
+[module]
+  [module.hugoVersion]
+    extended = true
+  [[module.imports]]
+    path = "github.com/colinwilson/lotusdocs"
+  [[module.imports]]
+    path = "github.com/gohugoio/hugo-mod-bootstrap-scss/v5"
+
+[markup]
+  [markup.goldmark.renderer]
+    unsafe = true
+  [markup.tableOfContents]
+    startLevel = 2
+    endLevel = 3
+
+[params]
+  description = "A NAT instance AMI for AWS on LinuxKit: fck-nat's features, immutable and in memory."
+  [params.footer]
+    copyright = "© :YEAR: natkit. MIT licensed."
+  [params.docs]
+    title = "natkit"
+    darkMode = true
+    prism = true
+    repoURL = "https://github.com/ulm0/natkit"
+    repoBranch = "main"
+    editPage = true
+    pathName = "docs"
+    lastMod = true
+    sidebarIcons = true
+    breadcrumbs = true
+    backToTop = true
+    toc = true
+    scrollSpy = true
+    descriptions = true
+    navDesc = true
+  [params.flexsearch]
+    enabled = true
+
+[menu]
+  [[menu.primary]]
+    name = "Docs"
+    url = "docs/"
+    identifier = "docs"
+    weight = 10
+  [[menu.primary]]
+    name = "GitHub"
+    url = "https://github.com/ulm0/natkit"
+    identifier = "github"
+    weight = 20
