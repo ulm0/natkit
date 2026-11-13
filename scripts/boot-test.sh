@@ -2,15 +2,15 @@
 # Boot test of a natkit AMI in fck-nat's HA setup, end to end:
 #  1. an EIP and a static ENI (source/dest check off) are made; the private subnet's route table gets
 #     0.0.0.0/0 -> the ENI; an SSM parameter holds a CloudWatch agent config
-#  2. NAT instance A boots with user-data eip_id + eni_id + tuning + cwagent: its console line must say ready,
-#     private eth1, the EIP, nat64 on, cwagent on
+#  2. NAT instance A boots with user-data eip_id + eni_id + tuning + cwagent + nat64: false: its console line must
+#     say ready, private eth1, the EIP, nat64 off, cwagent on. (Without Jool: v0.1.0 only forwarded IPv4 with it on.)
 #  3. a client (Amazon Linux 2023, private subnet, no public IP) prints its egress IP on its console every 15 s:
 #     it must be the EIP
-#  4. failover: instance B boots with the same user-data while A holds the ENI; A is terminated; B must attach the
+#  4. failover: instance B boots with the same user-data but NAT64 (the default) while A holds the ENI; A is terminated; B must attach the
 #     ENI, take the EIP, and the client's egress must work again through B
 #  5. the CloudWatch agent on B (pulled at boot) must publish mem_used_percent
 # When the subnets have IPv6 CIDRs, NAT64 too: the route table gets 64:ff9b::/96 -> the ENI and the client reaches an
-# IPv4-only address through it over IPv6 (steps 3 and 4); the egress must again be the EIP.
+# IPv4-only address through it over IPv6 (step 4, through B); the egress must again be the EIP.
 # Everything is tagged natkit.io/boot-test=<tag> and removed on exit (CI's boot-cleanup also removes it by tag).
 #
 #   scripts/boot-test.sh <ami-id> <arm64|amd64>
@@ -111,12 +111,15 @@ nat() { # nat <Name>: launches a NAT instance, prints its ID
 }
 want="natkit: ready, public eth0 private eth1, eip $eip, nat64 on, cwagent on"
 
-# 2. NAT instance A
+# 2. NAT instance A, without NAT64: plain IPv4 forwarding must not depend on Jool
+echo "nat64: false" >>"$ud"
 a=$(nat natkit-boot-test-a)
+sed -i.bak '$d' "$ud" && rm -f "$ud.bak" # B gets the default: NAT64 on
 echo "NAT A $a" >&2
 l=$(line "$a" 'natkit: ') || die "A: no natkit line on the console after 15 min"
 echo "A: $l"
-[ "$l" = "$want" ] || die "A: want '$want'"
+wa=$(echo "$want" | sed 's/nat64 on/nat64 off/')
+[ "$l" = "$wa" ] || die "A: want '$wa'"
 
 # 3. the client
 case $ARCH in arm64) p=arm64 ;; amd64) p=x86_64 ;; esac
@@ -139,10 +142,6 @@ client=$(aws ec2 run-instances --image-id "$cami" --instance-type "$CTYPE" \
 echo "client $client" >&2
 l=$(line "$client" "natkit-test: egress [0-9]* $eip_ip\$") || die "client: no egress through the EIP after 15 min"
 echo "client: $l"
-if [ -n "$v6" ]; then
-	l=$(line "$client" "natkit-test: nat64 [0-9]* $eip_ip\$") || die "client: no NAT64 egress through the EIP after 15 min"
-	echo "client: $l"
-fi
 
 # 4. failover: B waits for the ENI while A holds it
 b=$(nat natkit-boot-test-b)

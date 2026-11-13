@@ -37,6 +37,8 @@ run "" "natkit-init
 	nft list table inet natkit | grep -q 'hook input priority filter; policy drop;'
 	nft list table inet natkit | grep -q 'ct state invalid drop'
 	[ \$(cat /proc/sys/net/ipv4/conf/eth0/send_redirects) = 0 ]
+	[ \$(cat /proc/sys/net/ipv4/ip_forward) = 1 ] && [ \$(cat /proc/sys/net/ipv6/conf/all/forwarding) = 1 ]
+	[ \$(cat /proc/sys/net/ipv4/conf/all/accept_redirects) = 0 ]
 	[ \$(cat /proc/sys/net/ipv4/conf/all/rp_filter) = 0 ] && [ \$(cat /proc/sys/net/ipv4/conf/eth0/rp_filter) = 0 ]
 	[ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]
 	[ \"\$($calls)\" = '[]' ] && [ ! -e /run/natkit/cwagent ]"

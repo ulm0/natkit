@@ -7,7 +7,7 @@ kernel:
   # port. EBS volumes must never time out (AWS's recommended nvme_core.io_timeout). rootfstype=ramfs: without it
   # the initramfs unpacks into a tmpfs capped at half the RAM, which the ~190 MB image overflows on a 512 MB
   # t3.nano ("Initramfs unpacking failed: write error"); linuxkit/init then copies it into a tmpfs anyway.
-  # (t4g.nano still doesn't boot: its UEFI often can't allocate the initrd. Not supported, see README.)
+  # (Nanos still aren't supported: their UEFI often can't allocate the initrd at all, see README.)
   cmdline: "console=ttyS0,115200n8 earlycon nvme_core.io_timeout=4294967295 rootfstype=ramfs"
 init:
   - linuxkit/init:1c3e4933ceabd7418b961d66d5d884bf0044ac64@sha256:46899610b7f12e7a63cf1da2b71b71e9242b4d68daee26542c31a9756ff2dd84
@@ -20,10 +20,11 @@ init:
   # Jool's NAT64 modules for this kernel, at /lib/modules/<release>/extra (jool/jool.sh; the kernel's version)
   - ghcr.io/ulm0/natkit/jool:6.18.63
 onboot:
-  - name: sysctl # linuxkit's defaults + etc/natkit/sysctl.conf (forwarding); user-data tuning is natkit-init's
+  # linuxkit's defaults only. What a NAT needs (forwarding, rp_filter, hardening) is init/sysctl.conf, applied and
+  # checked by natkit-init: bound into this container it never ran (its rootfs is read-only, so runc couldn't make
+  # the mountpoint) and nothing noticed.
+  - name: sysctl
     image: linuxkit/sysctl:43ac1d39da329c3567fcb9689e5ca99de6d169b6@sha256:3e8668296e4b51859ef025f9ca8486c1ea99059c9d42f6bea7567b1d0445c145
-    binds.add:
-      - /etc/natkit/sysctl.conf:/etc/sysctl.d/90-natkit.conf
   - name: dhcpcd
     image: linuxkit/dhcpcd:b87e9ececac55a65eaa592f4dd8b4e0c3009afdb@sha256:c58b85778641b3d153f4094a9ae7aea62829fc0f84126fb15a2bb26041861ada
     command: ["/sbin/dhcpcd", "--nobackground", "-f", "/dhcpcd.conf", "-1"]
@@ -114,28 +115,6 @@ files:
     contents: |
       #!/bin/sh
       exec /sbin/poweroff
-  # a NAT forwards between interfaces; strict reverse-path filtering would drop traffic from the private subnets
-  # arriving on a second ENI. IPv6 router advertisements are dhcpcd's (in userspace), so forwarding doesn't stop them.
-  - path: etc/natkit/sysctl.conf
-    mode: "0644"
-    contents: |
-      net.ipv4.ip_forward = 1
-      net.ipv6.conf.all.forwarding = 1
-      net.ipv4.conf.all.rp_filter = 0
-      net.ipv4.conf.default.rp_filter = 0
-      # hardening: no ICMP redirects in or out (natkit-init also clears send_redirects per interface), no source
-      # routing, SYN cookies, no kernel addresses or log for unprivileged users, no unprivileged BPF
-      net.ipv4.conf.all.accept_redirects = 0
-      net.ipv4.conf.default.accept_redirects = 0
-      net.ipv6.conf.all.accept_redirects = 0
-      net.ipv6.conf.default.accept_redirects = 0
-      net.ipv4.conf.all.send_redirects = 0
-      net.ipv4.conf.default.send_redirects = 0
-      net.ipv4.conf.all.accept_source_route = 0
-      net.ipv4.tcp_syncookies = 1
-      kernel.dmesg_restrict = 1
-      kernel.kptr_restrict = 1
-      kernel.unprivileged_bpf_disabled = 1
   - path: etc/natkit/ntpd.conf
     mode: "0644"
     contents: |

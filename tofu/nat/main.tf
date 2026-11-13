@@ -35,12 +35,12 @@ variable "ami_id" {
   type        = string
 }
 variable "instance_type" {
-  description = "At least t4g.micro on arm64 (t4g.nano's UEFI often can't load the image), t3.nano on amd64; a micro with the CloudWatch agent."
+  description = "At least 1 GiB of memory: t4g.micro on arm64, t3.micro on amd64. A nano's UEFI often can't load the image."
   type        = string
   default     = "t4g.micro"
   validation {
-    condition     = var.instance_type != "t4g.nano"
-    error_message = "t4g.nano is not supported: its UEFI often can't load natkit's image. Use t4g.micro or larger."
+    condition     = !endswith(var.instance_type, ".nano")
+    error_message = "nano sizes are not supported: their UEFI often can't load natkit's image. Use a micro or larger."
   }
 }
 variable "eip" {

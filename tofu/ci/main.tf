@@ -17,9 +17,13 @@ variable "name" {
   type    = string
   default = "natkit-ci"
 }
-variable "github_subject" {
-  description = "OIDC subject pattern of the natkit repo, e.g. repo:<owner>@<owner id>/natkit@<repo id>:* (GitHub's immutable subject format) or repo:<owner>/natkit:*."
-  type        = string
+variable "github_subjects" {
+  description = "OIDC subjects allowed to assume the CI role: the natkit repo's main branch and release tags, e.g. [\"repo:<owner>/natkit:ref:refs/heads/main\", \"repo:<owner>/natkit:ref:refs/tags/v*\"] (or GitHub's immutable form, repo:<owner>@<owner id>/natkit@<repo id>:...). Not repo:...:*: any branch that can run a workflow could then take the role."
+  type        = list(string)
+  validation {
+    condition     = alltrue([for s in var.github_subjects : !endswith(s, ":*")])
+    error_message = "Name the refs (…:ref:refs/heads/main, …:ref:refs/tags/v*), not every ref of the repo (…:*)."
+  }
 }
 variable "oidc_provider_arn" {
   description = "The account's token.actions.githubusercontent.com OIDC provider."
@@ -113,7 +117,7 @@ resource "aws_iam_role" "github" {
       Principal = { Federated = var.oidc_provider_arn }
       Condition = {
         StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
-        StringLike   = { "token.actions.githubusercontent.com:sub" = var.github_subject }
+        StringLike   = { "token.actions.githubusercontent.com:sub" = var.github_subjects }
       }
     }]
   })

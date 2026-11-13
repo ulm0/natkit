@@ -19,6 +19,19 @@ Docs: [natkit.ulm0.com](https://natkit.ulm0.com).
 
 ## Usage
 
+The AMIs aren't public. Import a [release](https://github.com/ulm0/natkit/releases)'s disk image into your own
+account and region (or [build it](#building)):
+
+```sh
+V=v0.1.1 ARCH=arm64 # or amd64
+curl -fsSLO "https://github.com/ulm0/natkit/releases/download/$V/natkit-$V-$ARCH-efi.img.gz"
+gunzip "natkit-$V-$ARCH-efi.img.gz"
+AWS_REGION=us-east-1 NATKIT_BUCKET=my-import-bucket scripts/ami.sh "natkit-$V-$ARCH-efi.img" $ARCH "natkit-$V-$ARCH"
+```
+
+`scripts/ami.sh` (in this repo) uploads the image to the bucket, imports it as a snapshot and registers the AMI. It
+needs the [`vmimport` service role](https://docs.aws.amazon.com/vm-import/latest/userguide/required-permissions.html).
+
 Launch the AMI (`natkit-<version>-arm64` or `-amd64`) in a public subnet with a public IP, turn off source/dest
 check on its ENI (or use `eni_id`), and point the private subnets' default route at it, as you would for fck-nat.
 IMDSv2 is required by the AMI.
@@ -32,8 +45,8 @@ eni_id: eni-0123                      # HA: attach this static ENI (the route ta
 interface: eth0                       # public interface, if not the primary ENI's (ignored with eni_id)
 nat64: false                          # no NAT64 (default: on)
 ip_local_port_range: "1024 65535"     # tuning, applied only when set
-nf_conntrack_max: 262144
-nf_conntrack_buckets: 65536
+nf_conntrack_max: 262144              # default: one flow per 8 kB of RAM (about 117 000 on 1 GiB)
+nf_conntrack_buckets: 65536           # default: a quarter of nf_conntrack_max
 nf_conntrack_tcp_timeout_established: 86400
 tcp_keepalive_time: 600
 tcp_max_syn_backlog: 4096
@@ -92,11 +105,12 @@ plus `CloudWatchAgentServerPolicy` with `cwagent_enabled`. Scope `Resource` down
 where you can.
 
 The CloudWatch agent image (~150 MB unpacked) is pulled from `public.ecr.aws` through the NAT's own egress and kept
-in memory: use at least a `t4g.micro`/`t3.micro` with it.
+in memory.
 
-Instance size: at least `t4g.micro` on arm64 and `t3.nano` on amd64. `t4g.nano` is not supported: its UEFI often
-can't fit natkit's in-memory image next to the randomly placed (KASLR) kernel (`EFI stub: ERROR: Failed to load
-initrd`).
+Instance size: at least 1 GiB of memory (`t4g.micro` on arm64, `t3.micro` on amd64). The 0.5 GiB sizes (`t4g.nano`,
+`t3.nano`, `t3a.nano`) are not supported: their UEFI often can't fit natkit's in-memory image next to the randomly
+placed (KASLR) kernel, and the instance hangs at `EFI stub: ERROR: Failed to load initrd` while EC2 still reports it
+as running.
 
 ## Hardening
 
@@ -135,7 +149,7 @@ instead: it holds the account ID, and the run logs are public):
 
 | Variable | |
 |---|---|
-| `AWS_ROLE_ARN` (secret) | GitHub OIDC role: S3 + `ec2:ImportSnapshot`/`RegisterImage` (as yagan), and for the boot test EC2 instances, EIPs, ENIs, routes, `ssm:PutParameter`/`DeleteParameter` under `/natkit/boot-test/`, `iam:PassRole` for the test profile, `cloudwatch:GetMetricStatistics` |
+| `AWS_ROLE_ARN` (secret) | GitHub OIDC role, assumable only from `main` and `v*` tags: S3 + `ec2:ImportSnapshot`/`RegisterImage`, `ec2:DeregisterImage`/`DeleteSnapshot` on what it tagged `natkit.io/release` (per-commit AMIs are pruned after each run), and for the boot test EC2 instances, EIPs, ENIs, routes, `ssm:PutParameter`/`DeleteParameter` under `/natkit/boot-test/`, `iam:PassRole` for the test profile, `cloudwatch:GetMetricStatistics` |
 | `AWS_REGION` | the region for everything |
 | `NATKIT_BUCKET` | S3 bucket for image imports |
 | `NATKIT_TEST_PUBLIC_SUBNET` | subnet with an internet gateway route |
