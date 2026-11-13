@@ -21,8 +21,11 @@ while :; do
 	ctr task kill -s KILL cwagent 2>/dev/null
 	ctr container rm cwagent 2>/dev/null
 	# ctr run, unlike a LinuxKit service, gives the container no resolv.conf: the host's (dhcpcd's), read-only
-	ctr run --rm --net-host --mount "type=bind,src=$CONF,dst=/etc/cwagentconfig,options=rbind:ro" \
-		--mount "type=bind,src=/etc/resolv.conf,dst=/etc/resolv.conf,options=rbind:ro" "$IMAGE" cwagent
-	say "agent exited ($?), restarting"
+	# its output goes to memlogd as before; the last lines also go on the console when it exits
+	last=$(ctr run --rm --net-host --mount "type=bind,src=$CONF,dst=/etc/cwagentconfig,options=rbind:ro" \
+		--mount "type=bind,src=/etc/resolv.conf,dst=/etc/resolv.conf,options=rbind:ro" "$IMAGE" cwagent 2>&1 |
+		tee /dev/stderr | tail -n 8)
+	say "agent exited, restarting; its last output:"
+	printf '%s\n' "$last" | while IFS= read -r l; do say "  $l"; done
 	sleep 10
 done

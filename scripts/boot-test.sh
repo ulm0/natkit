@@ -182,5 +182,5 @@ for _ in $(seq 40); do
 	[ "$c" -gt 0 ] && echo "B: CloudWatch agent published $c datapoint(s)" && break
 	c=0
 done
-[ "$c" -gt 0 ] || { console "$b" | tr -d '\r' | grep -a 'natkit-cwagent' | tail -n 5 >&2; die "B: no CloudWatch agent metrics after 10 min"; }
+[ "$c" -gt 0 ] || { console "$b" | tr -d '\r' | grep -a 'natkit-cwagent' | tail -n 20 >&2; die "B: no CloudWatch agent metrics after 10 min"; }
 echo "boot test: ok" >&2
