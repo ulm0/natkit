@@ -8,8 +8,9 @@ ALPINE := alpine:3.24@sha256:3f4d6b32e26703c6082839234f43769d5046b3ac7c910033911
 REGISTRY := ghcr.io/ulm0/natkit
 # images natkit.yml uses; local builds tag these names, otherwise linuxkit pulls them from GHCR (CI pushes them)
 INIT_IMAGE := $(REGISTRY)/init:latest
-KERNEL_VERSION ?= 6.18.62
-KERNEL_IMAGE := $(REGISTRY)/kernel:$(KERNEL_VERSION)
+# the kernel natkit.yml pins (github.com/ulm0/lk-kernel), and Jool's modules built for it under its version
+KERNEL_IMAGE := $(shell sed -n 's|^  image: \(ghcr.io/ulm0/lk-kernel:.*\)$$|\1|p' natkit.yml)
+KERNEL_VERSION := $(shell echo '$(KERNEL_IMAGE)' | sed 's|.*:\([0-9.]*\)@.*|\1|')
 JOOL_IMAGE := $(REGISTRY)/jool:$(KERNEL_VERSION)
 # the docker daemon's architecture: everything builds natively (arm64 or amd64)
 ARCH ?= $(shell docker version -f '{{.Server.Arch}}' | sed 's/aarch64/arm64/;s/x86_64/amd64/')
@@ -40,12 +41,10 @@ $(IMG): natkit.yml init-image scripts/esp.sh | $(LK)
 		'apk add -q dosfstools mtools sfdisk >&2 && cat >/d.img && sh /esp.sh /d.img && cat /d.img' <$@ >$@.tmp
 	mv $@.tmp $@
 
-# Kernel (allnoconfig + kernel/natkit*.config) and Jool's modules for it, for the docker daemon's architecture
-.PHONY: kernel
-kernel: | $(LK)
-	LINUXKIT=$(LK) kernel/build.sh $(KERNEL_VERSION)
-	docker tag linuxkit/kernel:$(KERNEL_VERSION)-natkit $(KERNEL_IMAGE)
-	kernel/jool.sh $(KERNEL_IMAGE) $(JOOL_IMAGE)
+# Jool's modules for natkit.yml's kernel, for the docker daemon's architecture (otherwise linuxkit pulls them)
+.PHONY: jool
+jool:
+	jool/jool.sh $(KERNEL_IMAGE) $(JOOL_IMAGE)
 
 # AMI from $(IMG): needs AWS credentials, AWS_REGION, NATKIT_BUCKET (scripts/ami.sh)
 AMI_NAME ?= natkit-$(shell git describe --tags --always --dirty)-$(ARCH)

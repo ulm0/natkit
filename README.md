@@ -2,7 +2,7 @@
 
 A NAT instance AMI for AWS, arm64 and x86_64: [fck-nat](https://github.com/AndrewGuenther/fck-nat)'s features on
 [LinuxKit](https://github.com/linuxkit/linuxkit) instead of Amazon Linux, systemd and Packer. The OS is an immutable
-in-memory image: a minimal kernel built here, containerd, and a handful of service containers. There's no package
+in-memory image: a minimal kernel ([lk-kernel](https://github.com/ulm0/lk-kernel), shared with yagan and limakit), containerd, and a handful of service containers. There's no package
 manager, SSH or SSM agent.
 
 | fck-nat | natkit |
@@ -112,7 +112,7 @@ in memory: use at least a `t4g.micro`/`t3.micro` with it.
 Everything builds natively for the Docker daemon's architecture (arm64 or amd64):
 
 ```sh
-make kernel        # kernel (kernel/natkit*.config) + Jool modules, ~15 min; or let linuxkit pull them from GHCR
+make jool          # Jool modules for natkit.yml's kernel (lk-kernel); or let linuxkit pull them from GHCR
 make               # out/natkit-<arch>-efi.img
 make test          # natkit-init against a mock IMDS/EC2/SSM
 make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vmimport role

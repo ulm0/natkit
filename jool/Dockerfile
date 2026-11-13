@@ -1,6 +1,6 @@
-# Jool's NAT64 kernel modules for one natkit kernel, as a LinuxKit init image: /lib/modules/<release>/extra/*.ko,
+# Jool's NAT64 kernel modules for one natkit kernel (lk-kernel), as a LinuxKit init image: /lib/modules/<release>/extra/*.ko,
 # merged into the root filesystem. Built against the kernel image's kernel-dev.tar (headers, .config,
-# Module.symvers, host tools) in the kernel's own builder image (same compiler). kernel/jool.sh runs it.
+# Module.symvers, host tools) in the kernel's own builder image (same compiler). jool/jool.sh runs it.
 ARG KERNEL_IMAGE
 ARG BUILD_IMAGE
 FROM ${KERNEL_IMAGE} AS kernel
