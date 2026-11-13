@@ -24,6 +24,7 @@ enableGitInfo = true
     copyright = "© :YEAR: natkit. MIT licensed."
   [params.docs]
     title = "natkit"
+    themeColor = "copper" # assets/docs/scss/custom/colors/_copper.scss
     darkMode = true
     prism = true
     repoURL = "https://github.com/ulm0/natkit"

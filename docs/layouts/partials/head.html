@@ -20,8 +20,11 @@
     {{- if hugo.IsProduction}}
         {{- $options := dict "enableSourceMap" false "outputStyle" "compressed" }}
     {{- end }}
-    {{- $style := resources.Get "/scss/style.scss" }}
-    {{- $style = $style | resources.ExecuteAsTemplate "/scss/style.scss" . | css.Sass $options }}
+    {{- /* natkit: the landing page's primary colour is the theme's $blue, with no setting for it. Inline the theme's
+           variables with that one value changed to copper (the docs side is params.docs.themeColor). */}}
+    {{- $vars := (resources.Get "scss/_variables.scss").Content | replaceRE `(\$blue:\s+)#0066ff;` "${1}#b65116;" }}
+    {{- $style := resources.Get "/scss/style.scss" | resources.ExecuteAsTemplate "/scss/style.scss" . }}
+    {{- $style = replace $style.Content `@import "variables";` $vars | resources.FromString "/scss/style.scss" | css.Sass $options }}
     {{- if hugo.IsProduction }}
         {{- $style = $style | minify | fingerprint "sha384" }}
     {{- end -}}
