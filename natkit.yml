@@ -4,8 +4,10 @@ kernel:
   # picks the platform.
   image: ghcr.io/ulm0/lk-kernel:6.18.63@sha256:3ec177d959b7a88fcb3b1baffb91c0d10d6db1f2d868ac1d37abeae504f0b208
   # SPCR only gives earlycon; console=ttyS0 registers the real console, or userspace logs nothing to the serial
-  # port. EBS volumes must never time out (AWS's recommended nvme_core.io_timeout).
-  cmdline: "console=ttyS0,115200n8 earlycon nvme_core.io_timeout=4294967295"
+  # port. EBS volumes must never time out (AWS's recommended nvme_core.io_timeout). rootfstype=ramfs: without it
+  # the initramfs unpacks into a tmpfs capped at half the RAM, which the ~190 MB image overflows on a 512 MB
+  # t4g.nano ("Initramfs unpacking failed: write error"); linuxkit/init then copies it into a tmpfs anyway.
+  cmdline: "console=ttyS0,115200n8 earlycon nvme_core.io_timeout=4294967295 rootfstype=ramfs"
 init:
   - linuxkit/init:1c3e4933ceabd7418b961d66d5d884bf0044ac64@sha256:46899610b7f12e7a63cf1da2b71b71e9242b4d68daee26542c31a9756ff2dd84
   - linuxkit/runc:9442aa234715e751a16144f1d4ae3fd1a00fd492@sha256:a24c4eb57ca4c0f70e7f6a4da06ab18f26b276b152e22af4365f2ec50a1387bd
