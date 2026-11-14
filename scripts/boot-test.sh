@@ -7,8 +7,8 @@
 #     v0.1.0 only forwarded IPv4 with it on.)
 #  3. a client (Amazon Linux 2023, private subnet, no public IP) prints its egress IP on its console every 15 s:
 #     it must be the EIP
-#  4. failover: instance B boots with the same user-data but NAT64 (the default) while A holds the ENI; A is terminated; B must attach the
-#     ENI, take the EIP, and the client's egress must work again through B
+#  4. handover: instance B boots with the same user-data but NAT64 (the default) while A holds the ENI: B must take
+#     the ENI over and the EIP; A is then terminated, and the client's egress must work through B
 #  5. the CloudWatch agent on B (pulled at boot) must publish mem_used_percent
 # When the subnets have IPv6 CIDRs, NAT64 too: the route table gets 64:ff9b::/96 -> the ENI and the client reaches an
 # IPv4-only address through it over IPv6 (step 4, through B); the egress must again be the EIP.
@@ -21,6 +21,7 @@
 #   NATKIT_TEST_PRIVATE_SUBNET       subnet with its own route table and no other egress (the client), same VPC/AZ;
 #                                    no IPv6 egress either (no egress-only gateway), or the NAT64 check proves nothing
 #   NATKIT_TEST_INSTANCE_PROFILE     NAT role: ec2:AssociateAddress, ec2:AttachNetworkInterface,
+#                                    ec2:DetachNetworkInterface, ec2:DescribeNetworkInterfaces,
 #                                    ec2:ModifyNetworkInterfaceAttribute, ssm:GetParameter, CloudWatchAgentServerPolicy
 # Both subnets' instances use the VPC's default security group (admits traffic from itself).
 # Runs on Linux (CI) or macOS: e.g. against the AMIs of a `build` run dispatched with boot_test off, with
@@ -151,17 +152,18 @@ echo "client $client" >&2
 l=$(line "$client" "natkit-test: egress [0-9]* $eip_ip\$") || die "client: no egress through the EIP after 15 min"
 echo "client: $l"
 
-# 4. failover: B waits for the ENI while A holds it
+# 4. handover: B takes the ENI over from A, which is still running
 b=$(nat natkit-boot-test-b)
 echo "NAT B $b" >&2
-sleep 90
+l=$(line "$b" 'natkit: ') || die "B: no natkit line on the console after 15 min"
+echo "B: $l"
+[ "$l" = "$want" ] || die "B: want '$want'"
+h=$(aws ec2 describe-network-interfaces --network-interface-ids "$eni" --query 'NetworkInterfaces[0].Attachment.InstanceId' --output text)
+[ "$h" = "$b" ] || die "the ENI is on $h, not on B ($b)"
 aws ec2 terminate-instances --instance-ids "$a" >/dev/null
 aws ec2 wait instance-terminated --instance-ids "$a"
 a=
 n0=$(console "$client" | tr -d '\r' | grep -a 'natkit-test: egress' | tail -n 1 | cut -d' ' -f3)
-l=$(line "$b" 'natkit: ') || die "B: no natkit line on the console after 15 min"
-echo "B: $l"
-[ "$l" = "$want" ] || die "B: want '$want'"
 for _ in $(seq 40); do
 	sleep 15
 	# shellcheck disable=SC2046 # split on purpose: natkit-test: egress <n> <ip>
@@ -170,7 +172,7 @@ for _ in $(seq 40); do
 	set --
 done
 [ $# -gt 0 ] || die "client: no egress through B after 10 min"
-echo "client after failover: $*"
+echo "client after the handover: $*"
 if [ -n "$v6" ]; then
 	for _ in $(seq 40); do
 		sleep 15
@@ -180,7 +182,7 @@ if [ -n "$v6" ]; then
 		set --
 	done
 	[ $# -gt 0 ] || die "client: no NAT64 egress through B after 10 min"
-	echo "client after failover: $*"
+	echo "client after the handover: $*"
 fi
 
 # 5. the CloudWatch agent on B

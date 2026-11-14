@@ -64,7 +64,13 @@ A flow through a NAT instance counts twice, once on each network interface, unle
 
 ## Watch the limit
 
-The [CloudWatch agent](../cloudwatch/) can publish the ENA driver's counters. Add this to its config:
+With the [OpenTofu module](../opentofu/), `conntrack_alarm_actions` sets this up: the agent publishes the counters and a CloudWatch alarm goes off when EC2 drops packets.
+
+```hcl
+conntrack_alarm_actions = [aws_sns_topic.alerts.arn]
+```
+
+Without the module, the [CloudWatch agent](../cloudwatch/) can publish the ENA driver's counters. Add this to its config:
 
 ```json
 {

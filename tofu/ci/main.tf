@@ -1,5 +1,5 @@
-# What natkit's CI (.github/workflows/build.yml) needs in AWS: a GitHub OIDC role for the AMI import and the boot
-# test, a small test VPC (IPv4 + IPv6: a public subnet, a private subnet with its own empty route table), and the
+# What natkit's CI (.github/workflows/build.yml) needs in AWS: a GitHub OIDC role for the AMI import, the boot test
+# and the module test, a small test VPC (IPv4 + IPv6: a public subnet, a private subnet with its own empty route table), and the
 # NAT instances' test profile. `tofu output repo_variables` lists the repository variables to set.
 # Not created here: the account's GitHub OIDC provider, the S3 import bucket and the vmimport role (reuse yagan's).
 terraform {
@@ -51,6 +51,9 @@ locals {
   account = data.aws_caller_identity.current.account_id
   region  = data.aws_region.current.region
   ec2_arn = "${local.arn}:ec2:${local.region}:${local.account}"
+  ssm_arn = "${local.arn}:ssm:${local.region}:${local.account}"
+  # the boot test's agent config, and the one tofu/nat writes for the module test (its name is "natkit-module-test")
+  test_params = ["/natkit/boot-test/*", "/natkit/natkit-module-test/*"]
 }
 
 # ---- test network: a public subnet and a private one with its own route table, IPv4 + IPv6, one AZ
@@ -92,8 +95,8 @@ resource "aws_iam_role_policy" "nat" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      { Effect = "Allow", Action = ["ec2:AssociateAddress", "ec2:AttachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute"], Resource = "*" },
-      { Effect = "Allow", Action = "ssm:GetParameter", Resource = "${local.arn}:ssm:${local.region}:${local.account}:parameter/natkit/boot-test/*" },
+      { Effect = "Allow", Action = ["ec2:AssociateAddress", "ec2:AttachNetworkInterface", "ec2:DetachNetworkInterface", "ec2:DescribeNetworkInterfaces", "ec2:ModifyNetworkInterfaceAttribute"], Resource = "*" },
+      { Effect = "Allow", Action = "ssm:GetParameter", Resource = [for p in local.test_params : "${local.ssm_arn}:parameter${p}"] },
     ]
   })
 }
@@ -128,7 +131,8 @@ resource "aws_iam_role_policy" "github" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      { Sid = "ImportObjects", Effect = "Allow", Action = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"], Resource = "${local.arn}:s3:::${var.bucket}/import/*" },
+      # import/: the disk images; module-test/: the module test's state
+      { Sid = "ImportObjects", Effect = "Allow", Action = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"], Resource = ["${local.arn}:s3:::${var.bucket}/import/*", "${local.arn}:s3:::${var.bucket}/module-test/*"] },
       { Sid = "ImportBucket", Effect = "Allow", Action = ["s3:ListBucket", "s3:GetBucketLocation"], Resource = "${local.arn}:s3:::${var.bucket}" },
       # Describe* calls take no resource; the rest (AMI import, the boot test's instances, EIP, ENI and routes) are
       # created by the workflow, so they can't be named ahead
@@ -151,7 +155,42 @@ resource "aws_iam_role_policy" "github" {
         Resource  = ["${local.arn}:ec2:${local.region}::image/*", "${local.arn}:ec2:${local.region}::snapshot/*"]
         Condition = { StringLike = { "aws:ResourceTag/natkit.io/release" = "natkit-*" } }
       },
-      { Sid = "TestParameters", Effect = "Allow", Action = ["ssm:PutParameter", "ssm:DeleteParameter"], Resource = "${local.arn}:ssm:${local.region}:${local.account}:parameter/natkit/boot-test/*" },
+      {
+        Sid      = "TestParameters"
+        Effect   = "Allow"
+        Action   = ["ssm:PutParameter", "ssm:DeleteParameter", "ssm:GetParameter", "ssm:GetParameters", "ssm:ListTagsForResource", "ssm:AddTagsToResource"]
+        Resource = [for p in local.test_params : "${local.ssm_arn}:parameter${p}"]
+      },
+      # The module test applies tofu/nat (test/module): security groups and a launch template (created by the
+      # workflow, so not named ahead), the Auto Scaling group and the alarm under the module's name.
+      {
+        Sid    = "ModuleTestEc2"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup", "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:AuthorizeSecurityGroupEgress", "ec2:RevokeSecurityGroupIngress", "ec2:RevokeSecurityGroupEgress",
+          "ec2:CreateLaunchTemplate", "ec2:CreateLaunchTemplateVersion", "ec2:ModifyLaunchTemplate",
+          "ec2:DeleteLaunchTemplate", "ec2:DetachNetworkInterface", "ec2:DisassociateAddress",
+        ]
+        Resource = "*"
+      },
+      { Sid = "ModuleTestDescribe", Effect = "Allow", Action = ["autoscaling:Describe*", "cloudwatch:DescribeAlarms", "ssm:DescribeParameters"], Resource = "*" },
+      {
+        Sid    = "ModuleTestGroup"
+        Effect = "Allow"
+        Action = [
+          "autoscaling:CreateAutoScalingGroup", "autoscaling:UpdateAutoScalingGroup", "autoscaling:DeleteAutoScalingGroup",
+          "autoscaling:StartInstanceRefresh", "autoscaling:CancelInstanceRefresh", "autoscaling:CreateOrUpdateTags",
+          "autoscaling:DeleteTags", "autoscaling:SetInstanceProtection",
+        ]
+        Resource = "${local.arn}:autoscaling:${local.region}:${local.account}:autoScalingGroup:*:autoScalingGroupName/natkit-module-test-*"
+      },
+      {
+        Sid      = "ModuleTestAlarm"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms", "cloudwatch:ListTagsForResource", "cloudwatch:TagResource"]
+        Resource = "${local.arn}:cloudwatch:${local.region}:${local.account}:alarm:natkit-module-test-*"
+      },
       { Sid = "PublicAmiParameters", Effect = "Allow", Action = "ssm:GetParameter", Resource = "${local.arn}:ssm:${local.region}::parameter/aws/service/ami-amazon-linux-latest/*" },
       { Sid = "AgentMetrics", Effect = "Allow", Action = "cloudwatch:GetMetricStatistics", Resource = "*" },
       # ImportSnapshot passes the vmimport service role (created outside this module) to VM Import/Export; no

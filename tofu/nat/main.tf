@@ -1,5 +1,5 @@
 # A natkit NAT instance in fck-nat's HA layout: an Auto Scaling group of one, a static ENI the private route tables
-# point at (the replacement instance re-attaches it), and optionally an EIP. User-data is natkit's YAML.
+# point at (the replacement instance takes it over), and optionally an EIP. User-data is natkit's YAML.
 #
 #   module "nat" {
 #     source          = "github.com/ulm0/natkit//tofu/nat"
@@ -91,6 +91,16 @@ variable "cwagent_cfg_param_name" {
   type        = string
   default     = null
 }
+variable "conntrack_alarm_actions" {
+  description = "Alarm when EC2 drops packets because the instance's connection-tracking allowance ran out, with these actions (SNS topic ARNs; [] for an alarm without any). Runs the CloudWatch agent with a config that publishes the ENA driver's allowance counters, so not together with cwagent_cfg_param_name."
+  type        = list(string)
+  default     = null
+}
+variable "instance_profile" {
+  description = "Name of an existing instance profile to use instead of creating a role: for accounts where IAM is managed elsewhere. Its role needs what this module's would have (see aws_iam_role_policy.this)."
+  type        = string
+  default     = null
+}
 variable "console_password_param" {
   description = "SSM parameter with root's crypt hash (openssl passwd -6) for the EC2 Serial Console."
   type        = string
@@ -119,7 +129,9 @@ locals {
   tags      = merge(var.tags, { Name = var.name, natkit = var.name })
   arn       = "arn:${data.aws_partition.current.partition}"
   ec2_arn   = "${local.arn}:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"
-  ssm_names = compact([var.cwagent_cfg_param_name, var.console_password_param])
+  alarm     = var.conntrack_alarm_actions != null
+  cw_param  = local.alarm ? "/natkit/${var.name}/cwagent" : var.cwagent_cfg_param_name
+  ssm_names = compact([local.cw_param, var.console_password_param])
   client_cidrs = var.client_cidrs != null ? var.client_cidrs : concat(
     [for a in data.aws_vpc.this.cidr_block_associations : a.cidr_block if a.state == "associated"],
     var.ipv6_cidr == null ? [] : [var.ipv6_cidr],
@@ -131,7 +143,7 @@ locals {
     { eni_id = aws_network_interface.static.id, client_cidrs = local.client_cidrs },
     var.eip ? { eip_id = aws_eip.this[0].allocation_id } : {},
     var.nat64 ? {} : { nat64 = false },
-    var.cwagent_cfg_param_name == null ? {} : { cwagent_enabled = true, cwagent_cfg_param_name = var.cwagent_cfg_param_name },
+    local.cw_param == null ? {} : { cwagent_enabled = true, cwagent_cfg_param_name = local.cw_param },
     var.console_password_param == null ? {} : { console_password = var.console_password_param },
   )
 }
@@ -226,6 +238,7 @@ resource "aws_route" "nat64" {
 # the instance role: only what natkit-init calls, on this module's resources (the instance and its ENIs carry the
 # natkit tag from the launch template)
 resource "aws_iam_role" "this" {
+  count       = var.instance_profile == null ? 1 : 0
   name_prefix = "${var.name}-"
   tags        = local.tags
   assume_role_policy = jsonencode({
@@ -234,17 +247,24 @@ resource "aws_iam_role" "this" {
   })
 }
 resource "aws_iam_role_policy" "this" {
-  name = "natkit"
-  role = aws_iam_role.this.id
+  count = var.instance_profile == null ? 1 : 0
+  name  = "natkit"
+  role  = aws_iam_role.this[0].id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat(
       [{
         Sid       = "OwnInterfaces"
         Effect    = "Allow"
-        Action    = ["ec2:AttachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute", "ec2:AssociateAddress"]
+        Action    = ["ec2:AttachNetworkInterface", "ec2:DetachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute", "ec2:AssociateAddress"]
         Resource  = ["${local.ec2_arn}:network-interface/*", "${local.ec2_arn}:instance/*"]
         Condition = { StringEquals = { "aws:ResourceTag/natkit" = var.name } }
+        }, {
+        # the static ENI's attachment, to take it over from the instance being replaced; Describe* takes no resource
+        Sid      = "FindAttachment"
+        Effect   = "Allow"
+        Action   = "ec2:DescribeNetworkInterfaces"
+        Resource = "*"
       }],
       var.eip ? [{
         Sid      = "OwnEip"
@@ -262,13 +282,14 @@ resource "aws_iam_role_policy" "this" {
   })
 }
 resource "aws_iam_role_policy_attachment" "cwagent" {
-  count      = var.cwagent_cfg_param_name == null ? 0 : 1
-  role       = aws_iam_role.this.name
+  count      = var.instance_profile == null && local.cw_param != null ? 1 : 0
+  role       = aws_iam_role.this[0].name
   policy_arn = "${local.arn}:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 resource "aws_iam_instance_profile" "this" {
+  count       = var.instance_profile == null ? 1 : 0
   name_prefix = "${var.name}-"
-  role        = aws_iam_role.this.name
+  role        = aws_iam_role.this[0].name
   tags        = local.tags
 }
 
@@ -280,7 +301,7 @@ resource "aws_launch_template" "this" {
   tags          = local.tags
 
   iam_instance_profile {
-    arn = aws_iam_instance_profile.this.arn
+    name = var.instance_profile != null ? var.instance_profile : aws_iam_instance_profile.this[0].name
   }
   metadata_options {
     http_endpoint               = "enabled"
@@ -337,14 +358,75 @@ resource "aws_autoscaling_group" "this" {
     id      = aws_launch_template.this.id
     version = aws_launch_template.this.latest_version
   }
-  # a new AMI or user-data replaces the instance: there is only one, so egress stops until the new one has the ENI
+  # A replacement (a new AMI or user-data, an unhealthy instance) launches before the old instance terminates, and
+  # takes the ENI over once its own setup is done: egress stops for the handover only. The old instance goes
+  # after the warmup, whether or not the new one made it.
+  instance_maintenance_policy {
+    min_healthy_percentage = 100
+    max_healthy_percentage = 200
+  }
+  default_instance_warmup = 90
   instance_refresh {
     strategy = "Rolling"
-    preferences {
-      min_healthy_percentage = 0
+  }
+  depends_on = [aws_iam_role_policy.this, aws_ssm_parameter.cwagent]
+}
+
+# conntrack_alarm_actions: the agent publishes the ENA driver's allowance counters under the group's name (the
+# instance ID changes with every replacement), and the alarm watches the count of dropped packets grow. The counter
+# starts over on a new instance: a negative difference, no alarm.
+resource "aws_ssm_parameter" "cwagent" {
+  count = local.alarm ? 1 : 0
+  name  = local.cw_param
+  type  = "String"
+  tags  = local.tags
+  value = jsonencode({
+    metrics = {
+      namespace              = "natkit"
+      append_dimensions      = { AutoScalingGroupName = "$${aws:AutoScalingGroupName}" }
+      aggregation_dimensions = [["AutoScalingGroupName"]]
+      metrics_collected = {
+        ethtool = {
+          interface_include = ["eth0"]
+          metrics_include   = ["conntrack_allowance_exceeded", "conntrack_allowance_available"]
+        }
+      }
+    }
+  })
+  lifecycle {
+    precondition {
+      condition     = var.cwagent_cfg_param_name == null
+      error_message = "conntrack_alarm_actions writes the CloudWatch agent's config itself: leave cwagent_cfg_param_name unset, or add the alarm to your own config's metrics."
     }
   }
-  depends_on = [aws_iam_role_policy.this]
+}
+resource "aws_cloudwatch_metric_alarm" "conntrack" {
+  count               = local.alarm ? 1 : 0
+  alarm_name          = "${var.name}-conntrack-allowance-exceeded"
+  alarm_description   = "EC2 dropped packets on the ${var.name} NAT instance: its connection-tracking allowance ran out. Untrack the static ENI, shorten the idle timeout or use a larger instance type."
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  evaluation_periods  = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.conntrack_alarm_actions
+  tags                = local.tags
+
+  metric_query {
+    id          = "dropped"
+    expression  = "DIFF(total)"
+    label       = "packets dropped in the minute"
+    return_data = true
+  }
+  metric_query {
+    id = "total"
+    metric {
+      namespace   = "natkit"
+      metric_name = "ethtool_conntrack_allowance_exceeded"
+      period      = 60
+      stat        = "Maximum"
+      dimensions  = { AutoScalingGroupName = aws_autoscaling_group.this.name }
+    }
+  }
 }
 
 output "eni_id" {
@@ -362,6 +444,14 @@ output "public_security_group_id" {
   description = "The instance's primary (public) ENI's."
   value       = aws_security_group.public.id
 }
+output "autoscaling_group_name" {
+  value = aws_autoscaling_group.this.name
+}
+output "conntrack_alarm_name" {
+  description = "With conntrack_alarm_actions."
+  value       = one(aws_cloudwatch_metric_alarm.conntrack[*].alarm_name)
+}
 output "role_name" {
-  value = aws_iam_role.this.name
+  description = "The instance role this module created; null with instance_profile."
+  value       = one(aws_iam_role.this[*].name)
 }

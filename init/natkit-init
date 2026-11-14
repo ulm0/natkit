@@ -3,8 +3,9 @@
 # systemd or aws-cli. EC2 user-data (IMDSv2) is YAML with fck-nat's /etc/fck-nat.conf keys, all optional:
 #
 #   eip_id: eipalloc-0123                 # associate this EIP with the primary ENI (after eni_id's ENI is attached)
-#   eni_id: eni-0123                      # static ENI (the private route tables' target): attach as device 1, turn
-#                                         #   off the primary ENI's source/dest check
+#   eni_id: eni-0123                      # static ENI (the private route tables' target): attach as device 1 (taking
+#                                         #   it over from an instance that holds it), turn off the primary ENI's
+#                                         #   source/dest check
 #   nat64: false                          # no NAT64 (default: on)
 #   interface: eth0                       # public interface, if not the primary ENI's (ignored with eni_id)
 #   client_cidrs: [10.0.0.0/16]           # only these sources may open connections through the NAT (default: any)
@@ -340,15 +341,25 @@ if [ -n "$eni_id" ]; then
 	retry 10 "ModifyNetworkInterfaceAttribute $primary_eni" ec2 ModifyNetworkInterfaceAttribute \
 		"NetworkInterfaceId=$primary_eni" SourceDestCheck.Value=false
 	if ! eni_mac "$eni_id" >/dev/null; then
-		# an ASG replacement: the ENI stays attached to the old instance until it terminates. fck-nat waits forever;
-		# give up after 15 min so the console (getty) comes up and the failure is visible.
+		# An ASG replacement: the old instance still holds the ENI. Take it over (a forced detach: the old instance
+		# is on its way out and needn't agree), so egress stops for the detach and attach only, not for the old
+		# instance's shutdown or this one's boot. Without the permissions to, wait for the ENI as fck-nat does;
+		# fck-nat waits forever, natkit gives up after 15 min so the console (getty) shows the failure.
+		att=$(ec2 DescribeNetworkInterfaces "NetworkInterfaceId.1=$eni_id" 2>"$RUN/retry.err" |
+			yq -p xml '.DescribeNetworkInterfacesResponse.networkInterfaceSet.item.attachment.attachmentId // ""') || att=''
+		if [ -n "$att" ]; then
+			log "taking $eni_id over from its instance ($att)"
+			ec2 DetachNetworkInterface "AttachmentId=$att" Force=true >/dev/null || log "can't detach $att: waiting for it"
+		elif [ -s "$RUN/retry.err" ]; then
+			log "can't look up $eni_id's attachment: waiting for it"
+		fi
 		log "attaching $eni_id"
 		i=0
 		until ec2 AttachNetworkInterface "InstanceId=$iid" "NetworkInterfaceId=$eni_id" DeviceIndex=1 >/dev/null; do
 			i=$((i + 1))
-			[ "$i" -lt 180 ] || die "AttachNetworkInterface $eni_id: still failing after 15 min"
-			log "waiting for $eni_id to attach"
-			sleep 5
+			[ "$i" -lt 450 ] || die "AttachNetworkInterface $eni_id: still failing after 15 min"
+			[ $((i % 15)) != 1 ] || log "waiting for $eni_id to attach"
+			sleep 2
 		done
 	fi
 	i=0

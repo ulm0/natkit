@@ -14,11 +14,11 @@ icon: deployed_code
 
 ```hcl
 module "nat" {
-  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.2"
+  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.3"
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-v0.1.2-arm64: the same release as the module
+  ami_id          = "ami-..." # natkit-v0.1.3-arm64: the same release as the module
   instance_type   = "t4g.micro"
   settings        = { nf_conntrack_max = "262144" }
 }
@@ -42,12 +42,14 @@ module "nat" {
 | `tcp_established_timeout` | EC2's | EC2's idle timeout in seconds (60 to 432 000) for the established TCP connections it tracks, on both ENIs. Going back to `null` leaves the static ENI at its last value. See [Performance](../performance/) |
 | `settings` | `{}` | more [user-data keys](../configuration/) |
 | `cwagent_cfg_param_name` | `null` | SSM parameter with a CloudWatch agent JSON config: enables the agent |
+| `conntrack_alarm_actions` | `null` | alarm when EC2 drops packets because the [connection-tracking allowance](../performance/) ran out, with these actions (SNS topic ARNs; `[]` for none). Runs the CloudWatch agent with the module's own config, so not together with `cwagent_cfg_param_name` |
+| `instance_profile` | `null` | an existing instance profile to use instead of the module's role, where IAM is managed elsewhere. Its role needs the [instance role](../instance-role/)'s permissions |
 | `console_password_param` | `null` | SSM parameter with root's crypt hash for the EC2 Serial Console |
 | `tags` | `{}` | extra tags |
 
 ## Outputs
 
-`eni_id`, `public_ip` (the EIP, with `eip = true`), `security_group_id` (the static ENI's), `public_security_group_id` (the instance's primary ENI's), `role_name`.
+`eni_id`, `public_ip` (the EIP, with `eip = true`), `security_group_id` (the static ENI's), `public_security_group_id` (the instance's primary ENI's), `autoscaling_group_name`, `conntrack_alarm_name`, `role_name` (null with `instance_profile`).
 
 ## Security groups
 
@@ -60,6 +62,8 @@ The static ENI has to admit the clients: to EC2, a packet a client sends to the 
 
 ## Updates
 
-A new AMI, new user-data or a change to the primary ENI's security group replaces the instance through an instance refresh. There is only one instance, so egress stops until the new one has the ENI.
+A new AMI, new user-data or a change to the primary ENI's security group replaces the instance through an instance refresh. The replacement launches first, sets itself up and then [takes the ENI over](../high-availability/): egress stops for the handover (14 seconds in a test), and the connections open at that moment are cut. The old instance is terminated 90 seconds after the new one is in service.
 
 Upgrade the module and the AMI together, from the same release. Since v0.1.2 the module always sets `client_cidrs`, which natkit v0.1.1 and earlier refuse as an unknown key: the replacement instance would never take the ENI. The module refuses an AMI named `natkit-v0.1.0-*` or `natkit-v0.1.1-*`. The upgrade also splits the one security group into two.
+
+An AMI older than v0.1.3 doesn't take the ENI over. Its replacement waits for the ENI until the old instance is terminated, so egress stops for longer.

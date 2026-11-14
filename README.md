@@ -64,9 +64,10 @@ natkit: ready, public eth0 private eth1, eip eipalloc-0123, nat64 on, cwagent on
 natkit: FAIL <reason>
 ```
 
-For HA, run it in an Auto Scaling group of one with `eni_id` and `eip_id`. A replacement keeps retrying the ENI
-attachment for up to 15 minutes while the old instance still holds it, and takes the EIP only once it has the ENI
-(fck-nat takes the EIP first, which moves egress off the EIP while the old instance is still routing).
+For HA, run it in an Auto Scaling group of one with `eni_id` and `eip_id`. A replacement sets itself up, takes the
+ENI over from the instance that holds it (or, without the permissions to, retries the attachment for up to 15
+minutes), and takes the EIP only once it has the ENI (fck-nat takes the EIP first, which moves egress off the EIP
+while the old instance is still routing).
 
 NAT64 is on unless `nat64: false`: Jool translates `64:ff9b::/96` (pair it with Route 53 Resolver DNS64 on IPv6
 subnets and a `64:ff9b::/96` route to the instance, whose ENI needs an IPv6 address). Jool's default IPv4 pool is
@@ -78,11 +79,11 @@ ports 61001-65535 of the instance's address: keep `ip_local_port_range` below th
 
 ```hcl
 module "nat" {
-  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.2"
+  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.3"
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-v0.1.2-arm64: the same release as the module
+  ami_id          = "ami-..." # natkit-v0.1.3-arm64: the same release as the module
   settings        = { nf_conntrack_max = "262144" }
 }
 ```
@@ -97,6 +98,7 @@ Only needed for the keys that call AWS:
   "Statement": [
     {"Effect": "Allow", "Action": "ec2:AssociateAddress", "Resource": "*"},
     {"Effect": "Allow", "Action": ["ec2:AttachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute"], "Resource": "*"},
+    {"Effect": "Allow", "Action": ["ec2:DescribeNetworkInterfaces", "ec2:DetachNetworkInterface"], "Resource": "*"},
     {"Effect": "Allow", "Action": "ssm:GetParameter", "Resource": "arn:aws:ssm:*:*:parameter/natkit/*"}
   ]
 }
@@ -144,7 +146,9 @@ make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vm
 
 `.github/workflows/build.yml` builds both architectures on every push. Tags (`v*`) and manual runs also register
 the AMIs and run `scripts/boot-test.sh`: an EIP, a static ENI, a client in a private subnet whose egress must be the
-EIP, a failover to a second instance, CloudWatch agent metrics, and NAT64 when the test subnets have IPv6.
+EIP, a handover to a second instance, CloudWatch agent metrics, and NAT64 when the test subnets have IPv6. Then
+`scripts/module-test.sh` applies `tofu/nat` (arm64): the handover's time without egress, the conntrack alarm's
+metric, `client_cidrs`, `untracked` and the idle timeout.
 `tofu/ci` creates the role, test VPC and instance profile and outputs these repository variables (set `AWS_ROLE_ARN` as a secret
 instead: it holds the account ID, and the run logs are public):
 
