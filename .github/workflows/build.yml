@@ -3,6 +3,7 @@
 #           only when that kernel or jool/ changes; on main, the multi-arch jool:<ver> that natkit.yml names
 #   image   init image tested against a mock IMDS/EC2/SSM (test/init.sh); out/natkit-<arch>-efi.img as an artifact;
 #           init:<sha>, :latest (main), :<tag> (multi-arch)
+#   tofu    the OpenTofu configurations are formatted and valid (tofu/nat itself only runs on tags, in the module test)
 #   ami     on v* tags or a manual run: a UEFI AMI per arch named natkit-<tag|sha>-<arch>, tagged natkit.io/release
 #           (scripts/ami.sh), then the end-to-end boot test (scripts/boot-test.sh), one arch at a time (they share
 #           the test subnet's route table), and on arm64 the OpenTofu module's test (scripts/module-test.sh)
@@ -162,8 +163,24 @@ jobs:
           [ "${{ github.ref_type }}" = tag ] && set -- "$@" -t "$REGISTRY/init:${{ github.ref_name }}"
           docker buildx imagetools create "$@" "$REGISTRY/init:${{ github.sha }}-arm64" "$REGISTRY/init:${{ github.sha }}-amd64"
 
+  tofu:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_wrapper: false
+      - run: |
+          tofu fmt -check -recursive -diff tofu test/module
+          export TF_PLUGIN_CACHE_DIR="$RUNNER_TEMP/tofu-plugins" && mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          for d in tofu/nat tofu/ci test/module; do
+            tofu -chdir="$d" init -backend=false -input=false >/dev/null
+            tofu -chdir="$d" validate
+          done
+
   ami:
-    needs: image
+    needs: [image, tofu]
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     strategy:
       max-parallel: 1 # both boot tests route the same private subnet through their own ENI

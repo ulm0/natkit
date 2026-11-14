@@ -97,6 +97,9 @@ resource "aws_iam_role_policy" "nat" {
     Statement = [
       { Effect = "Allow", Action = ["ec2:AssociateAddress", "ec2:AttachNetworkInterface", "ec2:DetachNetworkInterface", "ec2:DescribeNetworkInterfaces", "ec2:ModifyNetworkInterfaceAttribute"], Resource = "*" },
       { Effect = "Allow", Action = "ssm:GetParameter", Resource = [for p in local.test_params : "${local.ssm_arn}:parameter${p}"] },
+      # the module test's group: its instances complete the launch lifecycle hook when they're ready
+      { Effect = "Allow", Action = "autoscaling:DescribeAutoScalingInstances", Resource = "*" },
+      { Effect = "Allow", Action = ["autoscaling:RecordLifecycleActionHeartbeat", "autoscaling:CompleteLifecycleAction"], Resource = "${local.arn}:autoscaling:${local.region}:${local.account}:autoScalingGroup:*:autoScalingGroupName/natkit-module-test-*" },
     ]
   })
 }
@@ -181,7 +184,8 @@ resource "aws_iam_role_policy" "github" {
         Action = [
           "autoscaling:CreateAutoScalingGroup", "autoscaling:UpdateAutoScalingGroup", "autoscaling:DeleteAutoScalingGroup",
           "autoscaling:StartInstanceRefresh", "autoscaling:CancelInstanceRefresh", "autoscaling:CreateOrUpdateTags",
-          "autoscaling:DeleteTags", "autoscaling:SetInstanceProtection",
+          "autoscaling:DeleteTags", "autoscaling:SetInstanceProtection", "autoscaling:PutLifecycleHook",
+          "autoscaling:DeleteLifecycleHook",
         ]
         Resource = "${local.arn}:autoscaling:${local.region}:${local.account}:autoScalingGroup:*:autoScalingGroupName/natkit-module-test-*"
       },

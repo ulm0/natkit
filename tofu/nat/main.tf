@@ -78,9 +78,18 @@ variable "tcp_established_timeout" {
   }
 }
 variable "settings" {
-  description = "More natkit user-data keys: nf_conntrack_max, ip_local_port_range, tcp_keepalive_time, ..."
+  description = "natkit's tuning keys for the user-data: ip_local_port_range, nf_conntrack_max, nf_conntrack_buckets, nf_conntrack_tcp_timeout_established, tcp_keepalive_time, tcp_max_syn_backlog."
   type        = map(any)
   default     = {}
+  nullable    = false
+  # natkit refuses a user-data key it doesn't know, at boot: a typo here would otherwise be a NAT that never comes up
+  validation {
+    condition = alltrue([for k in keys(var.settings) : contains([
+      "ip_local_port_range", "nf_conntrack_max", "nf_conntrack_buckets", "nf_conntrack_tcp_timeout_established",
+      "tcp_keepalive_time", "tcp_max_syn_backlog",
+    ], k)])
+    error_message = "settings: only ip_local_port_range, nf_conntrack_max, nf_conntrack_buckets, nf_conntrack_tcp_timeout_established, tcp_keepalive_time and tcp_max_syn_backlog. The other user-data keys come from this module's own variables."
+  }
 }
 variable "cwagent_cfg_param_name" {
   description = "SSM parameter with a CloudWatch agent JSON config: enables the agent. Needs 1 GiB of memory: a micro or larger."
@@ -132,11 +141,12 @@ locals {
     [for a in data.aws_vpc.this.cidr_block_associations : a.cidr_block if a.state == "associated"],
     var.ipv6_cidr == null ? [] : [var.ipv6_cidr],
   )
+  hook      = "natkit-ready" # aws_autoscaling_lifecycle_hook.ready, by name: the launch template can't depend on the group
   client_v4 = [for c in local.client_cidrs : c if !strcontains(c, ":")]
   client_v6 = [for c in local.client_cidrs : c if strcontains(c, ":")]
   user_data = merge(
     var.settings,
-    { eni_id = aws_network_interface.static.id, client_cidrs = local.client_cidrs },
+    { eni_id = aws_network_interface.static.id, client_cidrs = local.client_cidrs, lifecycle_hook = local.hook },
     var.eip ? { eip_id = aws_eip.this[0].allocation_id } : {},
     var.nat64 ? {} : { nat64 = false },
     local.cw_param == null ? {} : { cwagent_enabled = true, cwagent_cfg_param_name = local.cw_param },
@@ -256,11 +266,20 @@ resource "aws_iam_role_policy" "this" {
         Resource  = ["${local.ec2_arn}:network-interface/*", "${local.ec2_arn}:instance/*"]
         Condition = { StringEquals = { "aws:ResourceTag/natkit" = var.name } }
         }, {
-        # the static ENI's attachment, to take it over from the instance being replaced; Describe* takes no resource
-        Sid      = "FindAttachment"
+        # the static ENI's attachment, to take it over from the instance being replaced, and the instance's own
+        # group and lifecycle state; Describe* takes no resource
+        Sid      = "Find"
         Effect   = "Allow"
-        Action   = "ec2:DescribeNetworkInterfaces"
+        Action   = ["ec2:DescribeNetworkInterfaces", "autoscaling:DescribeAutoScalingInstances"]
         Resource = "*"
+        }, {
+        # the group's launch lifecycle hook (aws_autoscaling_lifecycle_hook.ready), which natkit completes when ready.
+        # The group's name is only known as a prefix here; its natkit tag makes it this module's group and no other
+        Sid       = "ReadyHook"
+        Effect    = "Allow"
+        Action    = ["autoscaling:RecordLifecycleActionHeartbeat", "autoscaling:CompleteLifecycleAction"]
+        Resource  = "${local.arn}:autoscaling:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.name}-*"
+        Condition = { StringEquals = { "aws:ResourceTag/natkit" = var.name } }
       }],
       var.eip ? [{
         Sid      = "OwnEip"
@@ -332,12 +351,12 @@ resource "aws_launch_template" "this" {
       tags          = local.tags
     }
   }
-  # natkit v0.1.1 and earlier stop at boot on client_cidrs, an unknown key to them, and the instance refresh would
-  # replace a working NAT with one that never takes the ENI
+  # natkit v0.1.3 and earlier stop at boot on lifecycle_hook, an unknown key to them (v0.1.1 and earlier on
+  # client_cidrs too): the replacement would never be put in service, and the rollout would never finish
   lifecycle {
     precondition {
-      condition     = !can(regex("^natkit-v0\\.1\\.[01]-", data.aws_ami.this.name))
-      error_message = "${data.aws_ami.this.name} doesn't know client_cidrs, which this module sets: use natkit v0.1.2 or later, the module's own release."
+      condition     = !can(regex("^natkit-v0\\.1\\.[0-3]-(arm64|amd64)$", data.aws_ami.this.name)) # the releases' names only
+      error_message = "${data.aws_ami.this.name} doesn't know lifecycle_hook, which this module sets: use natkit v0.1.4 or later, the module's own release."
     }
     # the agent's image is pulled into memory: on 0.5 GiB it doesn't fit, and the agent would never start
     precondition {
@@ -360,8 +379,8 @@ resource "aws_autoscaling_group" "this" {
     version = aws_launch_template.this.latest_version
   }
   # A replacement (a new AMI or user-data, an unhealthy instance) launches before the old instance terminates, and
-  # takes the ENI over once its own setup is done: egress stops for the handover only. The old instance goes
-  # after the warmup, whether or not the new one made it.
+  # takes the ENI over once its own setup is done: egress stops for the handover only. The old instance goes once
+  # the new one is in service (aws_autoscaling_lifecycle_hook.ready) and the warmup has passed.
   instance_maintenance_policy {
     min_healthy_percentage = 100
     max_healthy_percentage = 200
@@ -370,7 +389,29 @@ resource "aws_autoscaling_group" "this" {
   instance_refresh {
     strategy = "Rolling"
   }
+  # the instances get their tags from the launch template; this one is the group's own, for the role's ReadyHook
+  tag {
+    key                 = "natkit"
+    value               = var.name
+    propagate_at_launch = false
+  }
   depends_on = [aws_iam_role_policy.this, aws_ssm_parameter.cwagent]
+}
+
+# A new instance is in service when natkit says so, not when EC2 calls it running: the hook holds it in Pending:Wait
+# until natkit-init completes it, with its setup done and the ENI taken (the EIP follows). One that never does (a
+# setting natkit refuses, an image that doesn't boot) is terminated when the hook times out and the group tries again;
+# meanwhile the old instance, still in service, keeps routing. Without the hook the group would terminate the old
+# instance after the warmup, whatever became of the new one.
+# A resource of its own, not the group's initial_lifecycle_hook: that one only takes at the group's creation, and
+# groups made by earlier versions of this module need the hook too. The first instance of a new group launches
+# before the hook exists: there is nothing for it to replace.
+resource "aws_autoscaling_lifecycle_hook" "ready" {
+  name                   = local.hook
+  autoscaling_group_name = aws_autoscaling_group.this.name
+  lifecycle_transition   = "autoscaling:EC2_INSTANCE_LAUNCHING"
+  heartbeat_timeout      = 300
+  default_result         = "ABANDON"
 }
 
 # conntrack_alarm_actions: the agent publishes the ENA driver's allowance counters under the group's name (the
