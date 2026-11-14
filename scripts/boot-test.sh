@@ -233,4 +233,8 @@ console "$nano" | tr -d '\r' | grep -a -q 'natkit-boot: root in memory' ||
 l=$(line "$nano" 'natkit-metrics: publishing to CloudWatch, namespace natkit, Name=natkit-boot-test$') ||
 	die "nano: natkit-metrics doesn't publish after 15 min"
 echo "nano: $l"
+# the kernel's table at least EC2's allowance: below it, it fills first, where the allowance metrics don't see it
+l=$(console "$nano" | tr -d '\r' | grep -a 'natkit-init: EC2 conntrack allowance ' | tail -n 1)
+echo "nano: $l"
+echo "$l" | awk '{ exit !($5 + 0 > 0 && $7 + 0 >= $5 + 0) }' || die "nano: nf_conntrack_max below EC2's conntrack allowance"
 echo "boot test: ok" >&2
