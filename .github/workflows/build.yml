@@ -172,9 +172,9 @@ jobs:
         with:
           tofu_wrapper: false
       - run: |
-          tofu fmt -check -recursive -diff tofu test/module
+          tofu fmt -check -recursive -diff tofu test/module examples
           export TF_PLUGIN_CACHE_DIR="$RUNNER_TEMP/tofu-plugins" && mkdir -p "$TF_PLUGIN_CACHE_DIR"
-          for d in tofu/nat tofu/ci test/module; do
+          for d in tofu/nat tofu/ci test/module examples/vpc; do
             tofu -chdir="$d" init -backend=false -input=false >/dev/null
             tofu -chdir="$d" validate
           done
@@ -182,6 +182,10 @@ jobs:
         uses: docker://quay.io/terraform-docs/terraform-docs:0.25.1@sha256:7b2a74a2b9a9e6af41200335da47b73a64c39a0edd5afb91bc921f0a77eae681
         with:
           args: --output-check tofu/nat
+      - name: the VPC module page's example is examples/vpc (terraform-docs examples/vpc writes it)
+        uses: docker://quay.io/terraform-docs/terraform-docs:0.25.1@sha256:7b2a74a2b9a9e6af41200335da47b73a64c39a0edd5afb91bc921f0a77eae681
+        with:
+          args: --output-check examples/vpc
 
   ami:
     needs: [image, tofu]

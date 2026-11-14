@@ -146,6 +146,7 @@ make               # out/natkit-<arch>-efi.img
 make test          # natkit-init against a mock IMDS/EC2/SSM
 make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vmimport role
 terraform-docs tofu/nat   # the OpenTofu module page's Inputs and Outputs, from tofu/nat's descriptions
+terraform-docs examples/vpc   # the VPC module page's example, from examples/vpc/main.tf
 ```
 
 ## CI

@@ -24,6 +24,8 @@ module "nat" {
 }
 ```
 
+With the community VPC module, see [With the VPC module](../vpc-module/).
+
 <!-- terraform-docs tofu/nat writes Inputs and Outputs from the module's descriptions -->
 <!-- BEGIN_TF_DOCS -->
 ## Inputs
