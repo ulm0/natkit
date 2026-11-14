@@ -23,7 +23,7 @@ The AMIs aren't public. Import a [release](https://github.com/ulm0/natkit/releas
 account and region (or [build it](#building)):
 
 ```sh
-V=v0.1.1 ARCH=arm64 # or amd64
+V=v0.1.4 ARCH=arm64 # or amd64
 curl -fsSLO "https://github.com/ulm0/natkit/releases/download/$V/natkit-$V-$ARCH-efi.img.gz"
 gunzip "natkit-$V-$ARCH-efi.img.gz"
 AWS_REGION=us-east-1 NATKIT_BUCKET=my-import-bucket scripts/ami.sh "natkit-$V-$ARCH-efi.img" $ARCH "natkit-$V-$ARCH"
@@ -81,11 +81,11 @@ ports 61001-65535 of the instance's address: keep `ip_local_port_range` below th
 
 ```hcl
 module "nat" {
-  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.3"
+  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.4"
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-v0.1.3-arm64: the same release as the module
+  ami_id          = "ami-..." # natkit-v0.1.4-arm64: the same release as the module
   settings        = { nf_conntrack_max = "262144" }
 }
 ```
@@ -116,6 +116,9 @@ in memory.
 Instance size: 0.5 GiB of memory is enough (`t4g.nano` on arm64, `t3.nano` or `t3a.nano` on amd64). At boot the
 read-only root (a 66 MB squashfs) is copied from the EBS volume into memory, which is all natkit reads from the disk.
 The CloudWatch agent needs 1 GiB (`t4g.micro`, `t3.micro`): its image doesn't fit in a nano's memory.
+
+What a deployment is billed for (the instance, its 1 GiB volume, the public IPv4 address, CPU credits, data transfer,
+the optional metrics) is in the docs: [Costs](https://natkit.ulm0.com/docs/costs/).
 
 ## Hardening
 

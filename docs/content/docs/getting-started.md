@@ -18,7 +18,7 @@ There's no package manager, SSH or SSM agent.
 The AMIs aren't public. Import a [release](https://github.com/ulm0/natkit/releases)'s disk image into your own account and region, or [build it](../building/):
 
 ```sh
-V=v0.1.1 ARCH=arm64 # or amd64
+V=v0.1.4 ARCH=arm64 # or amd64
 curl -fsSLO "https://github.com/ulm0/natkit/releases/download/$V/natkit-$V-$ARCH-efi.img.gz"
 gunzip "natkit-$V-$ARCH-efi.img.gz"
 AWS_REGION=us-east-1 NATKIT_BUCKET=my-import-bucket scripts/ami.sh "natkit-$V-$ARCH-efi.img" $ARCH "natkit-$V-$ARCH"
@@ -45,7 +45,7 @@ Without user-data, natkit is a plain NAT out of the primary ENI. For the HA layo
 
 0.5 GiB of memory is enough. At boot natkit copies its read-only root, a 66 MB squashfs, from the EBS volume into memory, and doesn't read the volume again. The [CloudWatch agent](../cloudwatch/) needs 1 GiB (`t4g.micro`, `t3.micro`).
 
-A smaller instance also has smaller limits. See [Performance](../performance/).
+A smaller instance also has smaller limits. See [Performance](../performance/), and [Costs](../costs/) for what each size and everything around it is billed.
 
 ## Check that it's up
 

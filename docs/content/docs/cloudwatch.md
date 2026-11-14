@@ -25,7 +25,7 @@ About once a minute it sends two metrics to the `natkit` namespace, with the dim
 - Use a name that outlives the instance, such as the Auto Scaling group's: the instance ID changes with every replacement.
 - The console says `natkit-metrics: publishing to CloudWatch, namespace natkit, Name=nat-a` when it starts, and `natkit-metrics: can't publish: <reason>` if it stops.
 - A report is a new connection too. While the allowance is exhausted, EC2 drops it like any other: the metrics have no data until a report gets through, and that one covers the whole time. An alarm should react to missing data as well.
-- CloudWatch bills it: two custom metrics, about 52 000 requests a month and, with the module, one alarm. At list prices in US East (N. Virginia) that is about $1.20 a month for each NAT, before the free tier.
+- CloudWatch bills it: two custom metrics, about 52 000 requests a month and, with the module, one alarm. At list prices in US East (N. Virginia) that is about $1.20 a month for each NAT, before the free tier. See [Costs](../costs/#cloudwatch).
 
 The [OpenTofu module](../opentofu/) sets this with `conntrack_alarm_actions`, along with the alarm.
 
