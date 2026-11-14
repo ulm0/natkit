@@ -1,0 +1,13 @@
+# terraform-docs tofu/nat: the Inputs and Outputs of the module's docs page, from the descriptions in main.tf.
+# CI fails when the page is out of date.
+formatter: markdown table
+sections:
+  show: [inputs, outputs]
+output:
+  file: ../../docs/content/docs/opentofu.md
+  mode: inject
+sort:
+  enabled: false # main.tf's order: the required inputs first
+settings:
+  anchor: false
+  lockfile: false
