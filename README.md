@@ -157,7 +157,7 @@ instead: it holds the account ID, and the run logs are public):
 
 | Variable | |
 |---|---|
-| `AWS_ROLE_ARN` (secret) | GitHub OIDC role, assumable only from `main` and `v*` tags. It imports and registers AMIs and deletes the ones it tagged `natkit.io/release` (per-commit AMIs are pruned after each run). For the tests it creates instances, EIPs, ENIs, security groups, a launch template, an Auto Scaling group and an alarm, all with a test's tag, and changes or deletes only what carries one or is in the test VPC. `iam:PassRole` for the test profile only |
+| `AWS_ROLE_ARN` (secret) | GitHub OIDC role, assumable only from `main` and `v*` tags. It imports and registers AMIs and deletes the ones it tagged `natkit.io/release` (per-commit AMIs are pruned after each run). For the tests it creates instances, EIPs, ENIs, security groups and a launch template with a test's tag, and an Auto Scaling group and an alarm named `natkit-module-test-*`; it changes or deletes only those, what carries a test's tag or is in the test VPC. It tags only imported snapshots. `iam:PassRole` for the test profile and the `vmimport` role only |
 | `AWS_REGION` | the region for everything |
 | `NATKIT_BUCKET` | S3 bucket for image imports |
 | `NATKIT_TEST_PUBLIC_SUBNET` | subnet with an internet gateway route |

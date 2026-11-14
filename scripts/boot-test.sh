@@ -228,7 +228,9 @@ echo "nano: $l"
 [ "$l" = "natkit: ready, public eth0 private eth0, eip none, nat64 on, cwagent off" ] || die "nano: not a plain NAT that is ready"
 console "$nano" | tr -d '\r' | grep -a -q 'natkit-boot: root in memory' ||
 	die "nano: $(console "$nano" | tr -d '\r' | grep -a 'natkit-boot: ' | tail -n 1): the root is not in memory"
-l=$(line "$nano" 'natkit-metrics: ') || die "nano: nothing from natkit-metrics on the console after 15 min"
+# end-anchored, not the whole line: the getty's login prompt can be in front of it, and a first report that failed
+# says "can't publish" before this
+l=$(line "$nano" 'natkit-metrics: publishing to CloudWatch, namespace natkit, Name=natkit-boot-test$') ||
+	die "nano: natkit-metrics doesn't publish after 15 min"
 echo "nano: $l"
-[ "$l" = "natkit-metrics: publishing to CloudWatch, namespace natkit, Name=natkit-boot-test" ] || die "nano: natkit-metrics doesn't publish"
 echo "boot test: ok" >&2

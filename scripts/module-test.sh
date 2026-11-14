@@ -113,6 +113,8 @@ tf init -reconfigure -backend-config="bucket=$NATKIT_BUCKET" -backend-config="ke
 	{ tail -n 20 "$L/init.log" >&2; die "init"; }
 
 rt=$(aws ec2 describe-route-tables --filters "Name=association.subnet-id,Values=$TF_VAR_private_subnet" --query 'RouteTables[0].RouteTableId' --output text)
+# shortcut: a check, not a lock: a boot test can take the route between this check and tofu's create (two runs at
+# once, a tag push and a manual run); this test then fails at apply (1) with RouteAlreadyExists. Run it again.
 for _ in $(seq 60); do
 	busy=$(aws ec2 describe-route-tables --route-table-ids "$rt" --query "length(RouteTables[0].Routes[?DestinationCidrBlock=='0.0.0.0/0'])" --output text)
 	[ "$busy" = 0 ] && break

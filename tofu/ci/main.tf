@@ -1,8 +1,9 @@
 # What natkit's CI (.github/workflows/build.yml) needs in AWS: a GitHub OIDC role for the AMI import, the boot test
 # and the module test, a small test VPC (IPv4 + IPv6: a public subnet, a private subnet with its own empty route table), and the
 # NAT instances' test profile. `tofu output repo_variables` lists the repository variables to set.
-# Both roles reach only the test VPC and what a test tagged: the account may hold other things (a production NAT,
-# other VPCs), and a test script with a bug, or a tool in the job that was tampered with, must not get to them.
+# Both roles reach only the test VPC, what a test tagged and the module test's group and alarm (by name): the account
+# may hold other things (a production NAT, other VPCs), and a test script with a bug, or a tool in the job that was
+# tampered with, must not get to them.
 # Not created here: the account's GitHub OIDC provider, the S3 import bucket and the vmimport role (reuse yagan's).
 terraform {
   required_version = ">= 1.10"
@@ -152,14 +153,20 @@ resource "aws_iam_role_policy" "github" {
       # Describe* calls take no resource
       { Sid = "Describe", Effect = "Allow", Action = ["ec2:Describe*", "autoscaling:Describe*", "cloudwatch:DescribeAlarms"], Resource = "*" },
       # scripts/ami.sh. The import's request carries no tags and can't tag its snapshot, so the script tags it once it
-      # exists (boot-cleanup prunes by natkit.io/release), and registers the image from a snapshot with that tag
+      # exists (boot-cleanup prunes by natkit.io/release), and registers the image from a snapshot with that tag. Only
+      # a snapshot with no volume of its own (vol-ffffffff: an import, or a copy) can be tagged: not a volume's backup,
+      # which PruneAmis would then delete.
       { Sid = "Import", Effect = "Allow", Action = "ec2:ImportSnapshot", Resource = "*" },
       {
-        Sid       = "TagSnapshot"
-        Effect    = "Allow"
-        Action    = "ec2:CreateTags"
-        Resource  = "${local.arn}:ec2:${local.region}::snapshot/*"
-        Condition = { StringLike = { "aws:RequestTag/natkit.io/release" = "natkit-*" }, "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Name", "natkit.io/release"] } }
+        Sid      = "TagSnapshot"
+        Effect   = "Allow"
+        Action   = "ec2:CreateTags"
+        Resource = "${local.arn}:ec2:${local.region}::snapshot/*"
+        Condition = {
+          StringLike                  = { "aws:RequestTag/natkit.io/release" = "natkit-*" }
+          "ForAllValues:StringEquals" = { "aws:TagKeys" = ["Name", "natkit.io/release"] }
+          ArnLike                     = { "ec2:ParentVolume" = "${local.arn}:ec2:${local.region}:*:volume/vol-ffffffff" }
+        }
       },
       { Sid = "RegisterAmi", Effect = "Allow", Action = "ec2:RegisterImage", Resource = "${local.arn}:ec2:${local.region}::image/*", Condition = { StringLike = { "aws:RequestTag/natkit.io/release" = "natkit-*" } } },
       { Sid = "RegisterFrom", Effect = "Allow", Action = "ec2:RegisterImage", Resource = "${local.arn}:ec2:${local.region}::snapshot/*", Condition = { StringLike = { "aws:ResourceTag/natkit.io/release" = "natkit-*" } } },
@@ -246,11 +253,14 @@ resource "aws_iam_role_policy" "github" {
         ]
         Resource = local.test_group
       },
+      # Its actions can only be SNS topics of a test (it has none): an EC2 action would stop or terminate any instance,
+      # through CloudWatch's own role
       {
-        Sid      = "ModuleTestAlarm"
-        Effect   = "Allow"
-        Action   = ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms", "cloudwatch:ListTagsForResource", "cloudwatch:TagResource"]
-        Resource = "${local.arn}:cloudwatch:${local.region}:${local.account}:alarm:natkit-module-test-*"
+        Sid       = "ModuleTestAlarm"
+        Effect    = "Allow"
+        Action    = ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms", "cloudwatch:ListTagsForResource", "cloudwatch:TagResource"]
+        Resource  = "${local.arn}:cloudwatch:${local.region}:${local.account}:alarm:natkit-module-test-*"
+        Condition = { "ForAllValues:StringLike" = { "cloudwatch:AlarmActions" = "${local.arn}:sns:${local.region}:${local.account}:natkit-module-test-*" } }
       },
       { Sid = "PublicAmiParameters", Effect = "Allow", Action = "ssm:GetParameter", Resource = "${local.arn}:ssm:${local.region}::parameter/aws/service/ami-amazon-linux-latest/*" },
       { Sid = "AgentMetrics", Effect = "Allow", Action = "cloudwatch:GetMetricStatistics", Resource = "*" },

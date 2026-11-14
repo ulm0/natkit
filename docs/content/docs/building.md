@@ -33,4 +33,4 @@ On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](../opentof
 - a client outside `client_cidrs` gets nothing through, with `untracked`;
 - `tcp_established_timeout` reaches both ENIs.
 
-`tofu/ci` creates the CI role, test VPC and instance profile. Both roles reach only the test VPC and what a test tagged. See the [README](https://github.com/ulm0/natkit#ci) for the repository variables.
+`tofu/ci` creates the CI role, test VPC and instance profile. Both roles reach only the test VPC, what a test tagged and the module test's group and alarm. See the [README](https://github.com/ulm0/natkit#ci) for the repository variables.
