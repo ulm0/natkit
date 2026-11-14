@@ -7,6 +7,7 @@
 #                                         #   off the primary ENI's source/dest check
 #   nat64: false                          # no NAT64 (default: on)
 #   interface: eth0                       # public interface, if not the primary ENI's (ignored with eni_id)
+#   client_cidrs: [10.0.0.0/16]           # only these sources may open connections through the NAT (default: any)
 #   ip_local_port_range: "1024 65535"     # sysctl tuning, as in fck-nat
 #   nf_conntrack_max: 262144
 #   nf_conntrack_buckets: 65536
@@ -52,7 +53,7 @@ imds user-data >"$UD" 2>/dev/null || : # 404: no user-data
 yq -e 'tag == "!!map"' "$UD" >/dev/null 2>&1 || die "user-data is not a YAML map"
 
 # every key known (a typo would silently do nothing), every value in its expected shape
-KEYS="eip_id eni_id interface ip_local_port_range nf_conntrack_max nf_conntrack_buckets nf_conntrack_tcp_timeout_established
+KEYS="eip_id eni_id interface client_cidrs ip_local_port_range nf_conntrack_max nf_conntrack_buckets nf_conntrack_tcp_timeout_established
 tcp_keepalive_time tcp_max_syn_backlog cwagent_enabled cwagent_cfg_param_name console_password nat64"
 for k in $(yq 'keys | .[]' "$UD"); do
 	echo " $KEYS " | tr '\n' ' ' | grep -q " $k " || die "user-data: unknown key '$k'"
@@ -74,6 +75,20 @@ check cwagent_enabled 'true|false'
 yq -e '.nat64 == null or .nat64 == true or .nat64 == false' "$UD" >/dev/null 2>&1 || die "user-data: nat64: bad value '$(yq .nat64 "$UD")'"
 check cwagent_cfg_param_name '[A-Za-z0-9_./-]+'
 check console_password '[A-Za-z0-9_./-]+'
+# client_cidrs: a non-empty list of CIDRs, split by family for nftables (which checks the addresses themselves)
+yq -e '.client_cidrs == null or (.client_cidrs | tag == "!!seq" and length > 0)' "$UD" >/dev/null 2>&1 ||
+	die "user-data: client_cidrs: not a list of CIDRs"
+clients=$(yq '.client_cidrs != null' "$UD")
+c4='' c6=''
+for c in $(yq '.client_cidrs // [] | .[] | tostring' "$UD"); do
+	if echo "$c" | grep -qxE '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}'; then
+		c4="$c4${c4:+, }$c"
+	elif echo "$c" | grep -qxE '[0-9A-Fa-f:]*:[0-9A-Fa-f:]*/[0-9]{1,3}'; then
+		c6="$c6${c6:+, }$c"
+	else
+		die "user-data: client_cidrs: bad value '$c'"
+	fi
+done
 
 region=$(imds meta-data/placement/region)
 iid=$(imds meta-data/instance-id)
@@ -234,10 +249,28 @@ for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 >"$f"; done
 # a router on one interface would tell clients to bypass it (ICMP redirects); the kernel ORs all with each interface
 for f in /proc/sys/net/ipv4/conf/*/send_redirects; do echo 0 >"$f"; done
 
+# client_cidrs: only these sources may open a connection through the NAT; replies to it always pass. Without it
+# the security group alone decides who may (as before). NAT64 is gated in prerouting, at raw priority: Jool takes
+# the client's IPv6 packet at prerouting priority -75 and sends the translated IPv4 one itself, so neither reaches
+# the forward chain. auto-merge: overlapping CIDRs would otherwise be a conflicting-intervals error.
+fwd_policy=accept fwd='' sets='' pre=''
+if [ "$clients" = true ]; then
+	fwd_policy=drop
+	sets="set clients4 { type ipv4_addr; flags interval; auto-merge;${c4:+ elements = { $c4 };} }
+	set clients6 { type ipv6_addr; flags interval; auto-merge;${c6:+ elements = { $c6 };} }"
+	fwd="ct state established,related accept
+		ip saddr @clients4 accept
+		ip6 saddr @clients6 accept"
+	pre="chain prerouting {
+		type filter hook prerouting priority raw; policy accept;
+		ip6 daddr $JOOL_POOL6 ip6 saddr != @clients6 drop
+	}"
+fi
+
 # masquerade out of the public interface; one transaction, so there's no moment without the rule.
 # The instance itself accepts nothing new (it has no listening service; this keeps it so): replies, ICMP (path MTU,
-# IPv6 neighbour discovery) and DHCP only. Forwarded traffic isn't filtered (that's the security group's job),
-# except packets conntrack can't place in a connection: they'd skip the masquerade and leave with a private source.
+# IPv6 neighbour discovery) and DHCP only. Forwarded: packets conntrack can't place in a connection are dropped
+# (they'd skip the masquerade and leave with a private source), and new connections from outside client_cidrs.
 # NAT64 packets are taken by Jool in prerouting, before this input chain.
 nft -f - <<EOF || die "nftables"
 flush ruleset
@@ -248,6 +281,7 @@ table ip natkit {
 	}
 }
 table inet natkit {
+	$sets
 	chain input {
 		type filter hook input priority filter; policy drop;
 		ct state established,related accept
@@ -258,12 +292,24 @@ table inet natkit {
 		udp dport 546 accept
 	}
 	chain forward {
-		type filter hook forward priority filter; policy accept;
+		type filter hook forward priority filter; policy $fwd_policy;
 		ct state invalid drop
+		$fwd
 	}
+	$pre
 }
 EOF
-log "masquerading out of $public"
+log "masquerading out of $public${c4:+, clients $c4}${c6:+, clients $c6}"
+
+# EC2's connection-tracking allowance for this instance type: flows past it are dropped before they reach natkit.
+# Read now, before the clients' traffic, so it's the whole allowance. On the console next to the kernel's table,
+# but not as "natkit: ": that prefix is the one result line.
+a=$(ethtool -S "$public" 2>/dev/null | awk '$1 == "conntrack_allowance_available:" { print $2 }')
+if [ -n "$a" ]; then
+	l="EC2 conntrack allowance $a, nf_conntrack_max $(cat /proc/sys/net/netfilter/nf_conntrack_max)"
+	log "$l"
+	echo "natkit-init: $l" >"$CONSOLE" 2>/dev/null || :
+fi
 
 # NAT64: Jool's modules (the jool image in natkit.yml's init) and its userspace tool (this image), same version
 nat64=off

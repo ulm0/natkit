@@ -54,9 +54,32 @@ variable "nat64" {
   default     = false
 }
 variable "ipv6_cidr" {
-  description = "The VPC's IPv6 CIDR, admitted by the security group: needed with nat64."
+  description = "The VPC's IPv6 CIDR, a default client with nat64."
   type        = string
   default     = null
+}
+variable "client_cidrs" {
+  description = "Sources that may route through the NAT, IPv4 and IPv6. Enforced by the static ENI's security group (unless untracked) and by natkit's nftables. Default: the VPC's IPv4 CIDRs, plus ipv6_cidr."
+  type        = list(string)
+  default     = null
+  validation {
+    condition     = var.client_cidrs == null || (length(coalesce(var.client_cidrs, [])) > 0 && alltrue([for c in coalesce(var.client_cidrs, []) : can(cidrhost(c, 0))]))
+    error_message = "client_cidrs: a non-empty list of CIDRs (10.0.0.0/16, 2600:1f18::/56)."
+  }
+}
+variable "untracked" {
+  description = "Open the static ENI's security group to all traffic, so EC2 doesn't track the flows through it: about twice the connections before EC2's per-instance allowance runs out. client_cidrs is then enforced by natkit's nftables only."
+  type        = bool
+  default     = false
+}
+variable "tcp_established_timeout" {
+  description = "EC2's idle timeout, in seconds (60-432000), for established TCP connections it tracks on both ENIs. Default: EC2's (432000, or 350 on Nitro v6 instances). 350 matches NAT Gateway and frees the allowance from abandoned connections sooner."
+  type        = number
+  default     = null
+  validation {
+    condition     = var.tcp_established_timeout == null || (coalesce(var.tcp_established_timeout, 60) >= 60 && coalesce(var.tcp_established_timeout, 60) <= 432000)
+    error_message = "tcp_established_timeout: 60 to 432000 seconds."
+  }
 }
 variable "settings" {
   description = "More natkit user-data keys: nf_conntrack_max, ip_local_port_range, tcp_keepalive_time, ..."
@@ -90,9 +113,15 @@ locals {
   arn       = "arn:${data.aws_partition.current.partition}"
   ec2_arn   = "${local.arn}:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"
   ssm_names = compact([var.cwagent_cfg_param_name, var.console_password_param])
+  client_cidrs = var.client_cidrs != null ? var.client_cidrs : concat(
+    [for a in data.aws_vpc.this.cidr_block_associations : a.cidr_block if a.state == "associated"],
+    var.ipv6_cidr == null ? [] : [var.ipv6_cidr],
+  )
+  client_v4 = [for c in local.client_cidrs : c if !strcontains(c, ":")]
+  client_v6 = [for c in local.client_cidrs : c if strcontains(c, ":")]
   user_data = merge(
     var.settings,
-    { eni_id = aws_network_interface.static.id },
+    { eni_id = aws_network_interface.static.id, client_cidrs = local.client_cidrs },
     var.eip ? { eip_id = aws_eip.this[0].allocation_id } : {},
     var.nat64 ? {} : { nat64 = false },
     var.cwagent_cfg_param_name == null ? {} : { cwagent_enabled = true, cwagent_cfg_param_name = var.cwagent_cfg_param_name },
@@ -100,22 +129,13 @@ locals {
   )
 }
 
-# everything in the VPC may route through the NAT; nothing from outside reaches it (and natkit itself drops
-# inbound connections)
-resource "aws_security_group" "this" {
-  name_prefix = "${var.name}-"
-  description = "natkit NAT instance"
+# the public ENI: replies to what the NAT opened, nothing new from anywhere
+resource "aws_security_group" "public" {
+  name_prefix = "${var.name}-public-"
+  description = "natkit NAT instance, public ENI"
   vpc_id      = var.vpc_id
   tags        = local.tags
 
-  ingress {
-    description      = "VPC"
-    protocol         = "-1"
-    from_port        = 0
-    to_port          = 0
-    cidr_blocks      = [data.aws_vpc.this.cidr_block]
-    ipv6_cidr_blocks = var.ipv6_cidr == null ? [] : [var.ipv6_cidr]
-  }
   egress {
     protocol         = "-1"
     from_port        = 0
@@ -128,13 +148,53 @@ resource "aws_security_group" "this" {
   }
 }
 
+# the static ENI, the route tables' target: what the clients send to be forwarded arrives here. Only the clients,
+# or (untracked) everything: EC2 tracks no flow whose security group admits all traffic in both directions, and
+# natkit's nftables forwards only the clients' new connections either way.
+resource "aws_security_group" "private" {
+  name_prefix = "${var.name}-"
+  description = "natkit NAT instance"
+  vpc_id      = var.vpc_id
+  tags        = local.tags
+
+  ingress {
+    description      = var.untracked ? "all (untracked; natkit forwards only client_cidrs)" : "clients"
+    protocol         = "-1"
+    from_port        = 0
+    to_port          = 0
+    cidr_blocks      = var.untracked ? ["0.0.0.0/0"] : local.client_v4
+    ipv6_cidr_blocks = var.untracked ? ["::/0"] : local.client_v6
+  }
+  egress {
+    protocol         = "-1"
+    from_port        = 0
+    to_port          = 0
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+moved {
+  from = aws_security_group.this
+  to   = aws_security_group.private
+}
+
 resource "aws_network_interface" "static" {
   description        = "${var.name} static ENI (route target)"
   subnet_id          = var.subnet_id
-  security_groups    = [aws_security_group.this.id]
+  security_groups    = [aws_security_group.private.id]
   source_dest_check  = false
   ipv6_address_count = var.nat64 ? 1 : 0
   tags               = local.tags
+
+  dynamic "connection_tracking_specification" {
+    for_each = var.tcp_established_timeout == null ? [] : [var.tcp_established_timeout]
+    content {
+      tcp_established_timeout = connection_tracking_specification.value
+    }
+  }
 }
 
 resource "aws_eip" "this" {
@@ -223,9 +283,16 @@ resource "aws_launch_template" "this" {
   # a public IP at launch: natkit-init reaches the EC2 API with it before it has the EIP
   network_interfaces {
     associate_public_ip_address = true
-    security_groups             = [aws_security_group.this.id]
+    security_groups             = [aws_security_group.public.id]
     delete_on_termination       = true
     ipv6_address_count          = var.nat64 ? 1 : 0
+
+    dynamic "connection_tracking_specification" {
+      for_each = var.tcp_established_timeout == null ? [] : [var.tcp_established_timeout]
+      content {
+        tcp_established_timeout = connection_tracking_specification.value
+      }
+    }
   }
   block_device_mappings {
     device_name = "/dev/xvda"
@@ -273,7 +340,12 @@ output "public_ip" {
   value       = var.eip ? aws_eip.this[0].public_ip : null
 }
 output "security_group_id" {
-  value = aws_security_group.this.id
+  description = "The static ENI's: what the clients' traffic must pass."
+  value       = aws_security_group.private.id
+}
+output "public_security_group_id" {
+  description = "The instance's primary (public) ENI's."
+  value       = aws_security_group.public.id
 }
 output "role_name" {
   value = aws_iam_role.this.name
