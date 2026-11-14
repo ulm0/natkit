@@ -35,13 +35,9 @@ variable "ami_id" {
   type        = string
 }
 variable "instance_type" {
-  description = "At least 1 GiB of memory: t4g.micro on arm64, t3.micro on amd64. A nano's UEFI often can't load the image."
+  description = "0.5 GiB of memory is enough (t4g.nano, t3.nano); the CloudWatch agent (cwagent_cfg_param_name, conntrack_alarm_actions) needs 1 GiB."
   type        = string
   default     = "t4g.micro"
-  validation {
-    condition     = !endswith(var.instance_type, ".nano")
-    error_message = "nano sizes are not supported: their UEFI often can't load natkit's image. Use a micro or larger."
-  }
 }
 variable "eip" {
   description = "Allocate an EIP and have the instance take it. Otherwise it egresses from its own public IP, which changes on replacement."
@@ -87,7 +83,7 @@ variable "settings" {
   default     = {}
 }
 variable "cwagent_cfg_param_name" {
-  description = "SSM parameter with a CloudWatch agent JSON config: enables the agent. Use at least a micro instance."
+  description = "SSM parameter with a CloudWatch agent JSON config: enables the agent. Needs 1 GiB of memory: a micro or larger."
   type        = string
   default     = null
 }
@@ -342,6 +338,11 @@ resource "aws_launch_template" "this" {
     precondition {
       condition     = !can(regex("^natkit-v0\\.1\\.[01]-", data.aws_ami.this.name))
       error_message = "${data.aws_ami.this.name} doesn't know client_cidrs, which this module sets: use natkit v0.1.2 or later, the module's own release."
+    }
+    # the agent's image is pulled into memory: on 0.5 GiB it doesn't fit, and the agent would never start
+    precondition {
+      condition     = local.cw_param == null || !endswith(var.instance_type, ".nano")
+      error_message = "The CloudWatch agent (cwagent_cfg_param_name, conntrack_alarm_actions) needs 1 GiB of memory: use a micro or larger instance type."
     }
   }
 }

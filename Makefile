@@ -14,7 +14,7 @@ KERNEL_VERSION := $(shell echo '$(KERNEL_IMAGE)' | sed 's|.*:\([0-9.]*\)@.*|\1|'
 JOOL_IMAGE := $(REGISTRY)/jool:$(KERNEL_VERSION)
 # the docker daemon's architecture: everything builds natively (arm64 or amd64)
 ARCH ?= $(shell docker version -f '{{.Server.Arch}}' | sed 's/aarch64/arm64/;s/x86_64/amd64/')
-# the arm64 UKI needs an uncompressed (PE) kernel; x86's bzImage already is one
+# the firmware loads the kernel as a PE file: arm64's must be uncompressed; x86's bzImage already is one
 DECOMPRESS := $(if $(filter arm64,$(ARCH)),--decompress-kernel)
 IMG := out/natkit-$(ARCH)-efi.img
 
@@ -33,12 +33,13 @@ init-image: $(wildcard init/*)
 	docker build -t $(INIT_IMAGE) init
 	touch $@
 
-# raw-efi: GPT disk with an ESP holding systemd-boot and a UKI (kernel + initramfs root + cmdline).
-# scripts/esp.sh then reformats the ESP, which EC2's UEFI can't read as linuxkit makes it.
-$(IMG): natkit.yml init-image scripts/esp.sh | $(LK)
-	mkdir -p out && $(LK) build --docker $(DECOMPRESS) --format raw-efi --arch $(ARCH) --dir out --name natkit-$(ARCH) natkit.yml
-	docker run --rm -i -v $(CURDIR)/scripts/esp.sh:/esp.sh:ro $(ALPINE) sh -c \
-		'apk add -q dosfstools mtools sfdisk >&2 && cat >/d.img && sh /esp.sh /d.img && cat /d.img' <$@ >$@.tmp
+# kernel+squashfs: the kernel and a read-only squashfs root. scripts/disk.sh makes the GPT disk from them: an ESP
+# with systemd-boot, the kernel and a small initramfs that copies the root into memory, and the root on partition 2.
+$(IMG): natkit.yml init-image scripts/disk.sh scripts/initramfs-init | $(LK)
+	mkdir -p out && $(LK) build --docker $(DECOMPRESS) --format kernel+squashfs --arch $(ARCH) --dir out --name natkit-$(ARCH) natkit.yml
+	tar -C out -c natkit-$(ARCH)-kernel natkit-$(ARCH)-cmdline natkit-$(ARCH)-squashfs.img | docker run --rm -i \
+		-v $(CURDIR)/scripts/disk.sh:/disk.sh:ro -v $(CURDIR)/scripts/initramfs-init:/initramfs-init:ro $(ALPINE) sh -c \
+		'apk add -q dosfstools mtools sgdisk systemd-boot busybox-static cpio >&2 && sh /disk.sh natkit-$(ARCH)' >$@.tmp
 	mv $@.tmp $@
 
 # Jool's modules for natkit.yml's kernel, for the docker daemon's architecture (otherwise linuxkit pulls them)

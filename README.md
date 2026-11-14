@@ -110,10 +110,9 @@ where you can.
 The CloudWatch agent image (~150 MB unpacked) is pulled from `public.ecr.aws` through the NAT's own egress and kept
 in memory.
 
-Instance size: at least 1 GiB of memory (`t4g.micro` on arm64, `t3.micro` on amd64). The 0.5 GiB sizes (`t4g.nano`,
-`t3.nano`, `t3a.nano`) are not supported: their UEFI often can't fit natkit's in-memory image next to the randomly
-placed (KASLR) kernel, and the instance hangs at `EFI stub: ERROR: Failed to load initrd` while EC2 still reports it
-as running.
+Instance size: 0.5 GiB of memory is enough (`t4g.nano` on arm64, `t3.nano` or `t3a.nano` on amd64). At boot the
+read-only root (a 66 MB squashfs) is copied from the EBS volume into memory, which is all natkit reads from the disk.
+The CloudWatch agent needs 1 GiB (`t4g.micro`, `t3.micro`): its image doesn't fit in a nano's memory.
 
 ## Hardening
 

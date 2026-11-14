@@ -31,15 +31,15 @@ AMI=$1 ARCH=$2
 TAG=${NATKIT_BOOT_TEST_TAG:-$AMI}
 PUB=${NATKIT_TEST_PUBLIC_SUBNET:?} PRIV=${NATKIT_TEST_PRIVATE_SUBNET:?} PROFILE=${NATKIT_TEST_INSTANCE_PROFILE:?}
 case $ARCH in
-# micro, not nano, for the NAT instances: the CloudWatch agent (README) needs the memory
-arm64) TYPE=t4g.micro CTYPE=t4g.micro ;;
-amd64) TYPE=t3.micro CTYPE=t3.micro ;;
+# NATKIT_TEST_TYPE: the NAT instances' type, to try another size
+arm64) TYPE=${NATKIT_TEST_TYPE:-t4g.micro} CTYPE=t4g.micro ;;
+amd64) TYPE=${NATKIT_TEST_TYPE:-t3.micro} CTYPE=t3.micro ;;
 *) echo "arch must be arm64 or amd64" >&2 && exit 1 ;;
 esac
 PARAM=/natkit/boot-test/$TAG/cwagent
 NS=natkit-boot-test
 TAGS="{Key=natkit.io/boot-test,Value=$TAG}"
-eip='' eni='' a='' b='' client='' rt='' v6='' ud=$(mktemp) cud=$(mktemp)
+eip='' eni='' a='' b='' client='' rt='' v6='' ud=$(mktemp) cud=$(mktemp) err=$(mktemp)
 
 cleanup() {
 	set +e
@@ -56,7 +56,7 @@ cleanup() {
 	[ -z "$eni" ] || aws ec2 delete-network-interface --network-interface-id "$eni"
 	[ -z "$eip" ] || aws ec2 release-address --allocation-id "$eip"
 	aws ssm delete-parameter --name "$PARAM" 2>/dev/null
-	rm -f "$ud" "$cud"
+	rm -f "$ud" "$cud" "$err"
 }
 trap cleanup EXIT
 die() { echo "boot test: $*" >&2; exit 1; }
@@ -107,13 +107,24 @@ ip_local_port_range: "1024 61000"
 cwagent_enabled: true
 cwagent_cfg_param_name: $PARAM
 EOF
+# launch <run-instances arguments>: the instance's ID. The vCPU quota is the account's, shared with whatever else
+# runs there: waits up to 15 min for room.
+launch() {
+	for _ in $(seq 30); do
+		aws ec2 run-instances "$@" --query 'Instances[0].InstanceId' --output text 2>"$err" && return
+		grep -q VcpuLimitExceeded "$err" || break
+		echo "no vCPUs left in the quota, waiting" >&2
+		sleep 30
+	done
+	cat "$err" >&2
+	return 1
+}
 nat() { # nat <Name>: launches a NAT instance, prints its ID
-	aws ec2 run-instances --image-id "$AMI" --instance-type "$TYPE" --iam-instance-profile "Name=$PROFILE" \
+	launch --image-id "$AMI" --instance-type "$TYPE" --iam-instance-profile "Name=$PROFILE" \
 		--network-interfaces "DeviceIndex=0,SubnetId=$PUB,AssociatePublicIpAddress=true,DeleteOnTermination=true${v6:+,Ipv6AddressCount=1}" \
 		--metadata-options HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=1 \
 		--user-data "file://$ud" --block-device-mappings 'DeviceName=/dev/xvda,Ebs={Encrypted=true}' \
-		--tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$1},$TAGS]" \
-		--query 'Instances[0].InstanceId' --output text
+		--tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$1},$TAGS]"
 }
 want="natkit: ready, public eth0 private eth1, eip $eip, nat64 on, cwagent on"
 
@@ -143,11 +154,10 @@ setsid sh -c 'n=0; while :; do n=$((n + 1))
 	echo "natkit-test: nat64 $n $(curl -s -m 5 --resolve "'$H':443:[64:ff9b::$a]" https://'$H' || echo none)" >/dev/ttyS0
 	sleep 15; done' </dev/null >/dev/null 2>&1 &
 EOF
-client=$(aws ec2 run-instances --image-id "$cami" --instance-type "$CTYPE" \
+client=$(launch --image-id "$cami" --instance-type "$CTYPE" \
 	--network-interfaces "DeviceIndex=0,SubnetId=$PRIV,AssociatePublicIpAddress=false,DeleteOnTermination=true${v6:+,Ipv6AddressCount=1}" \
 	--metadata-options HttpTokens=required,HttpEndpoint=enabled --user-data "file://$cud" \
-	--tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=natkit-boot-test-client},$TAGS]" \
-	--query 'Instances[0].InstanceId' --output text)
+	--tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=natkit-boot-test-client},$TAGS]")
 echo "client $client" >&2
 l=$(line "$client" "natkit-test: egress [0-9]* $eip_ip\$") || die "client: no egress through the EIP after 15 min"
 echo "client: $l"

@@ -33,7 +33,7 @@ module "nat" {
 | `route_table_ids` | | private route tables that get `0.0.0.0/0` (and `64:ff9b::/96` with `nat64`) to the static ENI |
 | `ami_id` | | a natkit AMI of the instance type's architecture |
 | `name` | `natkit` | name and `natkit` tag of every resource |
-| `instance_type` | `t4g.micro` | see [instance size](../getting-started/#instance-size): `*.nano` sizes are rejected |
+| `instance_type` | `t4g.micro` | see [instance size](../getting-started/#instance-size). A `*.nano` works without the CloudWatch agent: the module refuses it with `cwagent_cfg_param_name` or `conntrack_alarm_actions` |
 | `eip` | `true` | allocate an EIP and have the instance take it. Otherwise it egresses from its own public IP, which changes on replacement |
 | `nat64` | `false` | route `64:ff9b::/96` to the ENI and give it an IPv6 address (the subnet needs an IPv6 CIDR) |
 | `ipv6_cidr` | `null` | the VPC's IPv6 CIDR, a default client with `nat64` |
