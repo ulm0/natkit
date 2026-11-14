@@ -119,10 +119,7 @@ files:
   # linuxkit/init's 000-issue prints this on the console at boot (it would greet with LinuxKit's)
   - path: etc/issue
     mode: "0644"
-    contents: |
-
-      Welcome to natkit, a NAT instance on LinuxKit: https://natkit.ulm0.com
-
+    contents: "\nWelcome to natkit, a NAT instance on LinuxKit: https://natkit.ulm0.com\n\n" # quoted: linuxkit refuses a block that starts with an empty line
   - path: etc/os-release
     mode: "0644"
     contents: |
