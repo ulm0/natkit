@@ -1,7 +1,8 @@
 # Mock EC2 IMDSv2 + EC2 Query API + SSM GetParameter for test/init.sh. User-data comes from /user-data, if mounted.
 # The primary ENI's MAC is the test container's (docker run --mac-address); the static ENI appears in the metadata
-# after AttachNetworkInterface, whose first call fails as if the ENI were still on an old instance. GET /_calls lists
-# the EC2 actions and their parameters.
+# after AttachNetworkInterface. The ENI starts out on an old instance: DescribeNetworkInterfaces shows that attachment
+# (or is denied, with NO_DESCRIBE set), DetachNetworkInterface starts the detach, and the first attach still fails.
+# GET /_calls lists the EC2 actions and their parameters.
 import json, os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qsl
@@ -21,6 +22,7 @@ META = {
 }
 PARAMS = {"/natkit/test/root-hash": "$6$salt$hash", "/natkit/test/plain": "hunter2",
           "/natkit/test/cw": '{"metrics": {"namespace": "natkit"}}', "/natkit/test/notjson": "[1, 2]"}
+OLD_ATTACHMENT = "eni-attach-0ccccccccccccccc"
 calls, attached, attach_tries = [], False, 0
 
 
@@ -77,6 +79,16 @@ class H(BaseHTTPRequestHandler):
         if action == "AssociateAddress" and p == {"AllocationId": "eipalloc-0123", "NetworkInterfaceId": ENI, "AllowReassociation": "true"}:
             return self.reply(200, ok_xml(action))
         if action == "ModifyNetworkInterfaceAttribute" and p == {"NetworkInterfaceId": ENI, "SourceDestCheck.Value": "false"}:
+            return self.reply(200, ok_xml(action))
+        if action == "DescribeNetworkInterfaces" and p == {"NetworkInterfaceId.1": STATIC_ENI}:
+            if os.environ.get("NO_DESCRIBE"):
+                return self.reply(403, err_xml("UnauthorizedOperation", "not authorized"))
+            return self.reply(200, (
+                '<DescribeNetworkInterfacesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><networkInterfaceSet><item>'
+                f"<networkInterfaceId>{STATIC_ENI}</networkInterfaceId><attachment><attachmentId>{OLD_ATTACHMENT}</attachmentId>"
+                "<instanceId>i-0old</instanceId><status>attached</status></attachment></item></networkInterfaceSet>"
+                "</DescribeNetworkInterfacesResponse>").encode())
+        if action == "DetachNetworkInterface" and p == {"AttachmentId": OLD_ATTACHMENT, "Force": "true"}:
             return self.reply(200, ok_xml(action))
         if action == "AttachNetworkInterface" and p == {"InstanceId": "i-0123456789abcdef0", "NetworkInterfaceId": STATIC_ENI, "DeviceIndex": "1"}:
             attach_tries += 1

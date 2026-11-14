@@ -13,7 +13,7 @@ trap 'docker rm -f natkit-mock >/dev/null 2>&1; docker network rm "$NET" >/dev/n
 run() {
 	docker rm -f natkit-mock >/dev/null 2>&1 || :
 	[ -z "$1" ] || printf '%s\n' "$1" >test/.user-data.yaml
-	docker run -d --name natkit-mock --network "$NET" -v "$PWD/test/mock.py:/mock.py:ro" \
+	docker run -d --name natkit-mock --network "$NET" -e "NO_DESCRIBE=${NO_DESCRIBE:-}" -v "$PWD/test/mock.py:/mock.py:ro" \
 		${1:+-v "$PWD/test/.user-data.yaml:/user-data:ro"} python:3.13-alpine python /mock.py >/dev/null
 	sleep 1
 	# by IP: natkit-init's `flush ruleset` also removes docker's embedded-DNS rules in this container
@@ -46,7 +46,7 @@ run "" "natkit-init
 	[ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]
 	[ \"\$($calls)\" = '[]' ] && [ ! -e /run/natkit/cwagent ]"
 
-echo "== everything: EIP, static ENI (attached on the second try), tuning, CloudWatch agent, console password"
+echo "== everything: EIP, static ENI (taken over from an old instance), tuning, CloudWatch agent, console password"
 run 'eip_id: eipalloc-0123
 eni_id: eni-0bbbbbbbbbbbbbbbb
 ip_local_port_range: "2048 60000"
@@ -59,13 +59,20 @@ console_password: /natkit/test/root-hash' "ip link add eth9 address 02:42:ac:11:
 	natkit-init
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth9, eip eipalloc-0123, nat64 off, cwagent on' ]
 	ip -o link show eth9 | grep -q ',UP'
-	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"ModifyNetworkInterfaceAttribute\",\"AttachNetworkInterface\",\"AttachNetworkInterface\",\"AssociateAddress\"]' ]
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"AttachNetworkInterface\",\"AssociateAddress\"]' ]
 	[ \"\$(tr -s '\t ' ' ' </proc/sys/net/ipv4/ip_local_port_range)\" = '2048 60000' ]
 	[ \$(cat /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_established) = 3600 ]
 	[ \$(cat /proc/sys/net/ipv4/tcp_keepalive_time) = 600 ] && [ \$(cat /proc/sys/net/ipv4/tcp_max_syn_backlog) = 4096 ]
 	[ \$(yq -p json .metrics.namespace /run/natkit/cwagent/cwagentconfig.json) = natkit ]
 	[ \"\$(cat /run/natkit/getty.shadow)\" = 'root:\$6\$salt\$hash::0:99999:7:::' ] && [ \$(stat -c %a /run/natkit/getty.shadow) = 600 ]
 	nft list table ip natkit | grep -q 'oifname \"eth0\" masquerade'"
+
+echo "== static ENI without the permission to look it up: no takeover, waits for it"
+NO_DESCRIBE=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
+	natkit-init >/tmp/log
+	grep -q \"can't look up eni-0bbbbbbbbbbbbbbbb's attachment: waiting for it\" /tmp/log
+	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth9, eip none, nat64 off, cwagent off' ]
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"AttachNetworkInterface\",\"AttachNetworkInterface\"]' ]"
 
 echo "== interface: masquerade out of another interface"
 run 'interface: eth9' "ip link add eth9 type dummy

@@ -1,5 +1,5 @@
 # A natkit NAT instance in fck-nat's HA layout: an Auto Scaling group of one, a static ENI the private route tables
-# point at (the replacement instance re-attaches it), and optionally an EIP. User-data is natkit's YAML.
+# point at (the replacement instance takes it over), and optionally an EIP. User-data is natkit's YAML.
 #
 #   module "nat" {
 #     source          = "github.com/ulm0/natkit//tofu/nat"
@@ -88,6 +88,11 @@ variable "settings" {
 }
 variable "cwagent_cfg_param_name" {
   description = "SSM parameter with a CloudWatch agent JSON config: enables the agent. Use at least a micro instance."
+  type        = string
+  default     = null
+}
+variable "instance_profile" {
+  description = "Name of an existing instance profile to use instead of creating a role: for accounts where IAM is managed elsewhere. Its role needs what this module's would have (see aws_iam_role_policy.this)."
   type        = string
   default     = null
 }
@@ -226,6 +231,7 @@ resource "aws_route" "nat64" {
 # the instance role: only what natkit-init calls, on this module's resources (the instance and its ENIs carry the
 # natkit tag from the launch template)
 resource "aws_iam_role" "this" {
+  count       = var.instance_profile == null ? 1 : 0
   name_prefix = "${var.name}-"
   tags        = local.tags
   assume_role_policy = jsonencode({
@@ -234,17 +240,24 @@ resource "aws_iam_role" "this" {
   })
 }
 resource "aws_iam_role_policy" "this" {
-  name = "natkit"
-  role = aws_iam_role.this.id
+  count = var.instance_profile == null ? 1 : 0
+  name  = "natkit"
+  role  = aws_iam_role.this[0].id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat(
       [{
         Sid       = "OwnInterfaces"
         Effect    = "Allow"
-        Action    = ["ec2:AttachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute", "ec2:AssociateAddress"]
+        Action    = ["ec2:AttachNetworkInterface", "ec2:DetachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute", "ec2:AssociateAddress"]
         Resource  = ["${local.ec2_arn}:network-interface/*", "${local.ec2_arn}:instance/*"]
         Condition = { StringEquals = { "aws:ResourceTag/natkit" = var.name } }
+        }, {
+        # the static ENI's attachment, to take it over from the instance being replaced; Describe* takes no resource
+        Sid      = "FindAttachment"
+        Effect   = "Allow"
+        Action   = "ec2:DescribeNetworkInterfaces"
+        Resource = "*"
       }],
       var.eip ? [{
         Sid      = "OwnEip"
@@ -262,13 +275,14 @@ resource "aws_iam_role_policy" "this" {
   })
 }
 resource "aws_iam_role_policy_attachment" "cwagent" {
-  count      = var.cwagent_cfg_param_name == null ? 0 : 1
-  role       = aws_iam_role.this.name
+  count      = var.instance_profile == null && var.cwagent_cfg_param_name != null ? 1 : 0
+  role       = aws_iam_role.this[0].name
   policy_arn = "${local.arn}:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 resource "aws_iam_instance_profile" "this" {
+  count       = var.instance_profile == null ? 1 : 0
   name_prefix = "${var.name}-"
-  role        = aws_iam_role.this.name
+  role        = aws_iam_role.this[0].name
   tags        = local.tags
 }
 
@@ -280,7 +294,7 @@ resource "aws_launch_template" "this" {
   tags          = local.tags
 
   iam_instance_profile {
-    arn = aws_iam_instance_profile.this.arn
+    name = var.instance_profile != null ? var.instance_profile : aws_iam_instance_profile.this[0].name
   }
   metadata_options {
     http_endpoint               = "enabled"
@@ -337,12 +351,16 @@ resource "aws_autoscaling_group" "this" {
     id      = aws_launch_template.this.id
     version = aws_launch_template.this.latest_version
   }
-  # a new AMI or user-data replaces the instance: there is only one, so egress stops until the new one has the ENI
+  # A replacement (a new AMI or user-data, an unhealthy instance) launches before the old instance terminates, and
+  # takes the ENI over once its own setup is done: egress stops for the handover only. The old instance goes
+  # after the warmup, whether or not the new one made it.
+  instance_maintenance_policy {
+    min_healthy_percentage = 100
+    max_healthy_percentage = 200
+  }
+  default_instance_warmup = 90
   instance_refresh {
     strategy = "Rolling"
-    preferences {
-      min_healthy_percentage = 0
-    }
   }
   depends_on = [aws_iam_role_policy.this]
 }
@@ -363,5 +381,6 @@ output "public_security_group_id" {
   value       = aws_security_group.public.id
 }
 output "role_name" {
-  value = aws_iam_role.this.name
+  description = "The instance role this module created; null with instance_profile."
+  value       = one(aws_iam_role.this[*].name)
 }
