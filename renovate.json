@@ -33,13 +33,24 @@
       "customType": "regex",
       "description": "CloudWatch agent, pulled at boot",
       "managerFilePatterns": [
-        "/^init/natkit-cwagent$/"
+        "/^init/cwagent\\.go$/"
       ],
       "matchStrings": [
-        "IMAGE=(?<depName>public\\.ecr\\.aws/cloudwatch-agent/cloudwatch-agent):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]+)"
+        "agentImage = \"(?<depName>public\\.ecr\\.aws/cloudwatch-agent/cloudwatch-agent):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]+)\""
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)b(?<build>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Go in the Makefile (linuxkit's build and natkit's unit tests; init/Dockerfile's is Renovate's dockerfile manager)",
+      "managerFilePatterns": [
+        "/^Makefile$/"
+      ],
+      "matchStrings": [
+        "GOLANG := (?<depName>golang):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "datasourceTemplate": "docker"
     }
   ],
   "packageRules": [

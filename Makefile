@@ -3,7 +3,7 @@ export DOCKER_HOST ?= $(shell docker context inspect --format "{{.Endpoints.dock
 # bumping it rebuilds.
 LINUXKIT_REF := 0e34a007431a3a3c19a03fc6bca00fba51774706 # 2026-10-27
 LK := bin/linuxkit-$(shell echo $(LINUXKIT_REF) | cut -c1-12)
-GOLANG := golang:1.25-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59
+GOLANG := golang:1.27.4-alpine3.24@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf
 ALPINE := alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 REGISTRY := ghcr.io/ulm0/natkit
 # images natkit.yml uses; local builds tag these names, otherwise linuxkit pulls them from GHCR (CI pushes them)
@@ -30,7 +30,7 @@ $(LK):
 	chmod +x $@.tmp && mv $@.tmp $@
 
 init-image: $(wildcard init/*)
-	docker build -t $(INIT_IMAGE) init
+	docker build --build-arg VERSION=$(shell git describe --tags --always --dirty) -t $(INIT_IMAGE) init
 	touch $@
 
 # kernel+squashfs: the kernel and a read-only squashfs root. scripts/disk.sh makes the GPT disk from them: an ESP
@@ -49,12 +49,17 @@ jool:
 
 # AMI from $(IMG): needs AWS credentials, AWS_REGION, NATKIT_BUCKET (scripts/ami.sh)
 AMI_NAME ?= natkit-$(shell git describe --tags --always --dirty)-$(ARCH)
-.PHONY: ami test clean
+.PHONY: ami test unit clean
 ami: $(IMG)
 	scripts/ami.sh $< $(ARCH) $(AMI_NAME) natkit.io/release=$(AMI_NAME)
 
-test:
+# natkit's Go unit tests (init/), then the image against a mock IMDS/EC2/SSM/Auto Scaling/CloudWatch (test/init.sh)
+test: unit
 	test/init.sh
+
+unit:
+	docker run --rm -v $(CURDIR)/init:/src:ro -w /src -e GOFLAGS=-buildvcs=false -e GOCACHE=/tmp/go -e GOMODCACHE=/tmp/mod $(GOLANG) \
+		sh -c 'test -z "$$(gofmt -l .)" && go vet ./... && go test -count=1 ./...'
 
 clean:
 	rm -rf out init-image

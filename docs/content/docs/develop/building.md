@@ -10,7 +10,8 @@ Everything builds natively for the Docker daemon's architecture (arm64 or amd64)
 ```sh
 make jool          # Jool modules for natkit.yml's kernel (lk-kernel); or let linuxkit pull them from GHCR
 make               # out/natkit-<arch>-efi.img
-make test          # natkit-init against a mock IMDS/EC2/SSM
+make test          # natkit's Go unit tests, then the image against a mock IMDS, EC2, SSM, Auto Scaling and CloudWatch
+cd init && go test ./...   # the unit tests alone (Go 1.27)
 make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vmimport role
 terraform-docs tofu/nat   # the OpenTofu module page's Inputs and Outputs, from tofu/nat's descriptions
 terraform-docs examples/vpc   # the VPC module page's example, from examples/vpc/main.tf
@@ -18,6 +19,8 @@ hugo --source docs && python3 docs/check-links.py docs/public   # the docs site,
 ```
 
 ## CI
+
+natkit's own code is one Go binary in `init/`, on the AWS SDK for Go v2: `natkit-init` (onboot), `natkit-metrics` and `natkit-cwagent` (services). Its unit tests run against fakes of IMDS, AWS and the host, and the SDK's clients against a fake of each API on the wire.
 
 `.github/workflows/build.yml` builds both architectures for pushes to `main`, `v*` tags and pull requests, unless they change only the docs (`.github/workflows/docs.yml` builds and checks those). Tags, and manual runs on `main` that keep `boot_test` on, also register the AMIs and run `scripts/boot-test.sh`, which checks:
 
@@ -36,6 +39,8 @@ On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](/docs/depl
 - a client outside `client_cidrs` gets nothing through, with `untracked`;
 - `tcp_established_timeout` reaches both ENIs;
 - NAT64 at every stage: both test subnets need an IPv6 CIDR, and the private one no egress-only gateway.
+
+Every push also checks the Go code: `gofmt`, `go vet`, the unit tests with the race detector, and the user-data parser fuzzed for a minute.
 
 Per-commit AMIs are deregistered after each run. A release keeps its own AMIs and deregisters those of lower releases, so only the latest release's stay.
 

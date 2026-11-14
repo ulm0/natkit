@@ -1,8 +1,10 @@
 # Builds natively on GitHub's arm64 and x64 runners, one matrix leg per architecture:
 #   jool    Jool's modules for the kernel natkit.yml pins (github.com/ulm0/lk-kernel): jool:<ver>-<key>-<arch>, rebuilt
 #           only when that kernel or jool/ changes; on main, the multi-arch jool:<ver> that natkit.yml names
-#   image   init image tested against a mock IMDS/EC2/SSM (test/init.sh); out/natkit-<arch>-efi.img as an artifact;
+#   image   init image (natkit, the Go binary) tested against a mock IMDS/EC2/SSM/Auto Scaling/CloudWatch
+#           (test/init.sh); out/natkit-<arch>-efi.img as an artifact;
 #           init:<sha>, :latest (main), :<tag> (multi-arch)
+#   go      natkit's Go code (init/): gofmt, go vet, unit tests with the race detector, the user-data parser fuzzed
 #   tofu    the OpenTofu configurations are formatted and valid (tofu/nat itself only runs on tags, in the module test)
 #   ami     on v* tags or a manual run: a UEFI AMI per arch named natkit-<tag|sha>-<arch>, tagged natkit.io/release
 #           (scripts/ami.sh), then the end-to-end boot test (scripts/boot-test.sh), one arch at a time (they share
@@ -117,13 +119,13 @@ jobs:
           path: bin
           key: linuxkit-${{ runner.arch }}-${{ hashFiles('Makefile') }}
           restore-keys: linuxkit-${{ runner.arch }}-
-      - run: shellcheck -S warning init/natkit-init init/natkit-cwagent init/natkit-metrics jool/jool.sh scripts/*.sh scripts/initramfs-init test/init.sh test/ethtool
+      - run: shellcheck -S warning jool/jool.sh scripts/*.sh scripts/initramfs-init test/init.sh test/ethtool
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: make test
+      - run: test/init.sh # the image against the mock; the Go unit tests are the go job's
       - name: this commit's Jool modules, under the name natkit.yml uses (linuxkit pulls the pinned kernel)
         run: |
           kernel=$(sed -n 's|^  image: \(ghcr.io/ulm0/lk-kernel:.*\)$|\1|p' natkit.yml)
@@ -147,7 +149,7 @@ jobs:
           docker push "$REGISTRY/init:${{ github.sha }}-${{ matrix.arch }}"
 
   init-manifest:
-    needs: image
+    needs: [image, go] # init:latest and init:<tag> only once the Go code's checks passed too
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
@@ -182,8 +184,31 @@ jobs:
             tofu -chdir="$d" validate
           done
 
+  # natkit's Go code (init/): formatted, vetted, its unit tests with the race detector, the user-data parser fuzzed,
+  # and built for both architectures. test/init.sh (the image job's make test) runs the binary against the mock.
+  go:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: init
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: init/go.mod
+          cache-dependency-path: init/go.sum
+      - name: formatted and vetted
+        run: test -z "$(gofmt -l .)" && go vet ./...
+      - name: unit tests, with the race detector
+        run: go test -count=1 -race -coverprofile=cover.out ./... && go tool cover -func=cover.out | tail -n 1
+      - name: the user-data parser, fuzzed
+        run: go test -run '^$' -fuzz FuzzUserData -fuzztime 60s .
+      - name: built for both architectures
+        run: for a in arm64 amd64; do CGO_ENABLED=0 GOOS=linux GOARCH=$a go build -o /dev/null .; done
+
   ami:
-    needs: [image, tofu]
+    needs: [image, tofu, go]
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     strategy:
       max-parallel: 1 # both boot tests route the same private subnet through their own ENI
