@@ -7,7 +7,7 @@ icon: deployed_code
 
 `tofu/nat` sets up the [HA layout](../high-availability/) as a module:
 
-- an Auto Scaling group of one;
+- an Auto Scaling group of one, with a [launch lifecycle hook](../high-availability/#when-the-replacement-fails): a replacement is in service when natkit says it's ready, not before;
 - a static ENI and an EIP;
 - the private route tables' routes;
 - a scoped instance role.
@@ -46,6 +46,14 @@ module "nat" {
 | `instance_profile` | `null` | an existing instance profile to use instead of the module's role, where IAM is managed elsewhere. Its role needs the [instance role](../instance-role/)'s permissions |
 | `console_password_param` | `null` | SSM parameter with root's crypt hash for the EC2 Serial Console |
 | `tags` | `{}` | extra tags |
+
+## Upgrading
+
+Use the module and the AMI of the same release. The module refuses an AMI older than the keys it sets: from v0.1.4 it sets `lifecycle_hook`, which natkit v0.1.3 and earlier don't know.
+
+- Upgrading the module replaces the instance once: its user-data changes.
+- The lifecycle hook is created along with that first replacement, so it may not hold it yet. It holds every one after.
+- With `instance_profile`, add the Auto Scaling actions of the [instance role](../instance-role/) to your role before you upgrade. Without them the new instance fails its setup, and the old one keeps routing.
 
 ## Outputs
 

@@ -13,7 +13,8 @@ trap 'docker rm -f natkit-mock >/dev/null 2>&1; docker network rm "$NET" >/dev/n
 run() {
 	docker rm -f natkit-mock >/dev/null 2>&1 || :
 	[ -z "$1" ] || printf '%s\n' "$1" >test/.user-data.yaml
-	docker run -d --name natkit-mock --network "$NET" -e "NO_DESCRIBE=${NO_DESCRIBE:-}" -e "ATTACHED=${ATTACHED:-}" -v "$PWD/test/mock.py:/mock.py:ro" \
+	docker run -d --name natkit-mock --network "$NET" -e "NO_DESCRIBE=${NO_DESCRIBE:-}" -e "ATTACHED=${ATTACHED:-}" \
+		-e "ASG_STATE=${ASG_STATE:-}" -e "NO_COMPLETE=${NO_COMPLETE:-}" -v "$PWD/test/mock.py:/mock.py:ro" \
 		${1:+-v "$PWD/test/.user-data.yaml:/user-data:ro"} python:3.13-alpine python /mock.py >/dev/null
 	sleep 1
 	# by IP: natkit-init's `flush ruleset` also removes docker's embedded-DNS rules in this container
@@ -46,7 +47,7 @@ run "" "natkit-init
 	[ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]
 	[ \"\$($calls)\" = '[]' ] && [ ! -e /run/natkit/cwagent ]"
 
-echo "== everything: EIP, static ENI (taken over from an old instance), tuning, CloudWatch agent, console password"
+echo "== everything: EIP, static ENI (taken over from an old instance), tuning, CloudWatch agent, console password, lifecycle hook"
 run 'eip_id: eipalloc-0123
 eni_id: eni-0bbbbbbbbbbbbbbbb
 ip_local_port_range: "2048 60000"
@@ -55,11 +56,12 @@ tcp_keepalive_time: 600
 tcp_max_syn_backlog: 4096
 cwagent_enabled: true
 cwagent_cfg_param_name: /natkit/test/cw
-console_password: /natkit/test/root-hash' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
+console_password: /natkit/test/root-hash
+lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
 	natkit-init
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth9, eip eipalloc-0123, nat64 off, cwagent on' ]
 	ip -o link show eth9 | grep -q ',UP'
-	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"AttachNetworkInterface\",\"AssociateAddress\"]' ]
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"DescribeAutoScalingInstances\",\"DescribeAutoScalingInstances\",\"RecordLifecycleActionHeartbeat\",\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"AttachNetworkInterface\",\"AssociateAddress\",\"CompleteLifecycleAction\"]' ]
 	[ \"\$(tr -s '\t ' ' ' </proc/sys/net/ipv4/ip_local_port_range)\" = '2048 60000' ]
 	[ \$(cat /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_established) = 3600 ]
 	[ \$(cat /proc/sys/net/ipv4/tcp_keepalive_time) = 600 ] && [ \$(cat /proc/sys/net/ipv4/tcp_max_syn_backlog) = 4096 ]
@@ -79,6 +81,32 @@ ATTACHED=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb' "ip link add eth9 address 02:42:a
 	natkit-init
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth9, eip none, nat64 off, cwagent off' ]
 	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"ModifyNetworkInterfaceAttribute\"]' ]"
+
+echo "== lifecycle_hook on an instance already in service (a reboot), or in no group: nothing to complete"
+ASG_STATE=InService run 'lifecycle_hook: natkit-ready' "natkit-init >/tmp/log
+	grep -q 'lifecycle_hook: nothing to complete, the instance is InService' /tmp/log
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"DescribeAutoScalingInstances\"]' ]"
+ASG_STATE=none run 'lifecycle_hook: natkit-ready' "natkit-init >/tmp/log
+	grep -q 'lifecycle_hook: nothing to complete, the instance is in no Auto Scaling group' /tmp/log
+	grep -q 'natkit: ready' /tmp/console"
+
+echo "== lifecycle_hook: a hook it can't reach (here, another name) fails before the ENI is taken"
+run 'eni_id: eni-0bbbbbbbbbbbbbbbb
+lifecycle_hook: other' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
+	if natkit-init >/dev/null 2>&1; then exit 1; fi
+	grep -qF 'natkit: FAIL RecordLifecycleActionHeartbeat other failed: natkit-init: RecordLifecycleActionHeartbeat: HTTP 400 ValidationError: No active Lifecycle Action found' /tmp/console
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action) | unique')\" = '[\"DescribeAutoScalingInstances\",\"RecordLifecycleActionHeartbeat\"]' ]"
+
+echo "== lifecycle_hook: held by the hook, an ENI it can't take over is a failure, not a wait"
+NO_DESCRIBE=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb
+lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
+	if natkit-init >/dev/null 2>&1; then exit 1; fi
+	grep -qF \"natkit: FAIL eni-0bbbbbbbbbbbbbbbb: can't take it over\" /tmp/console
+	if $calls | grep -q AttachNetworkInterface; then exit 1; fi"
+
+echo "== lifecycle_hook: a hook it can't complete is a failure the console shows"
+NO_COMPLETE=1 run 'lifecycle_hook: natkit-ready' "if natkit-init >/dev/null 2>&1; then exit 1; fi
+	grep -qF 'natkit: FAIL CompleteLifecycleAction natkit-ready failed: natkit-init: CompleteLifecycleAction: HTTP 403 AccessDenied: not authorized' /tmp/console"
 
 echo "== interface: masquerade out of another interface"
 run 'interface: eth9' "ip link add eth9 type dummy
@@ -115,6 +143,7 @@ fails 'cwagent_enabled: true
 cwagent_cfg_param_name: /natkit/test/notjson' "cwagent: /natkit/test/notjson is not a JSON object"
 fails 'console_password: /natkit/test/plain' "console_password: /natkit/test/plain is not a crypt hash"
 fails 'interface: eth7' "interface: no interface eth7"
+fails 'lifecycle_hook: "a b"' "user-data: lifecycle_hook: bad value"
 fails 'client_cidrs: 10.0.0.0/16' "user-data: client_cidrs: not a list of CIDRs"
 fails 'client_cidrs: []' "user-data: client_cidrs: not a list of CIDRs"
 fails 'client_cidrs: [10.0.0.0]' "user-data: client_cidrs: bad value '10.0.0.0'"
@@ -128,17 +157,14 @@ fails 'client_cidrs: ["2600:zz::/56"]' "user-data: client_cidrs: bad value '2600
 fails 'eip_id: eipalloc-0bad' "AssociateAddress eipalloc-0bad failed: natkit-init: AssociateAddress: HTTP 400 InvalidParameterValue: unexpected"
 fails '- a list' "user-data is not a YAML map"
 
-echo "== a setup that fails takes neither the ENI nor the EIP, and reports itself unhealthy to its group"
+echo "== a setup that fails takes neither the ENI nor the EIP, and leaves the lifecycle hook alone"
 run 'eip_id: eipalloc-0123
 eni_id: eni-0bbbbbbbbbbbbbbbb
+lifecycle_hook: natkit-ready
 console_password: /natkit/test/plain' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
 	if natkit-init >/dev/null 2>&1; then exit 1; fi
 	grep -qF 'natkit: FAIL console_password' /tmp/console
-	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"SetInstanceHealth\"]' ]"
-
-echo "== so does a refused user-data"
-run 'bogus: 1' "if natkit-init >/dev/null 2>&1; then exit 1; fi
-	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"SetInstanceHealth\"]' ]"
+	[ \"\$($calls)\" = '[]' ]"
 
 echo "== a failed setup still leaves the getty a (locked) shadow file"
 run 'bogus: 1' "if natkit-init 2>/dev/null; then exit 1; fi; [ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]"

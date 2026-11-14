@@ -54,6 +54,7 @@ tcp_max_syn_backlog: 4096
 cwagent_enabled: true                 # CloudWatch agent with the JSON config in this SSM parameter
 cwagent_cfg_param_name: /natkit/cwagent
 console_password: /natkit/root-hash   # SSM parameter holding `openssl passwd -6` output: serial console login
+lifecycle_hook: natkit-ready          # the Auto Scaling group's launch lifecycle hook, completed when ready
 ```
 
 Unknown keys and malformed values stop the setup. The result is printed as one line on the serial console
@@ -99,7 +100,7 @@ Only needed for the keys that call AWS:
     {"Effect": "Allow", "Action": "ec2:AssociateAddress", "Resource": "*"},
     {"Effect": "Allow", "Action": ["ec2:AttachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute"], "Resource": "*"},
     {"Effect": "Allow", "Action": ["ec2:DescribeNetworkInterfaces", "ec2:DetachNetworkInterface"], "Resource": "*"},
-    {"Effect": "Allow", "Action": "autoscaling:SetInstanceHealth", "Resource": "*"},
+    {"Effect": "Allow", "Action": ["autoscaling:DescribeAutoScalingInstances", "autoscaling:RecordLifecycleActionHeartbeat", "autoscaling:CompleteLifecycleAction"], "Resource": "*"},
     {"Effect": "Allow", "Action": "ssm:GetParameter", "Resource": "arn:aws:ssm:*:*:parameter/natkit/*"}
   ]
 }

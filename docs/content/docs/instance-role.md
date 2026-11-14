@@ -14,7 +14,7 @@ natkit only needs an instance role for the keys that call AWS:
     {"Effect": "Allow", "Action": "ec2:AssociateAddress", "Resource": "*"},
     {"Effect": "Allow", "Action": ["ec2:AttachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute"], "Resource": "*"},
     {"Effect": "Allow", "Action": ["ec2:DescribeNetworkInterfaces", "ec2:DetachNetworkInterface"], "Resource": "*"},
-    {"Effect": "Allow", "Action": "autoscaling:SetInstanceHealth", "Resource": "*"},
+    {"Effect": "Allow", "Action": ["autoscaling:DescribeAutoScalingInstances", "autoscaling:RecordLifecycleActionHeartbeat", "autoscaling:CompleteLifecycleAction"], "Resource": "*"},
     {"Effect": "Allow", "Action": "ssm:GetParameter", "Resource": "arn:aws:ssm:*:*:parameter/natkit/*"}
   ]
 }
@@ -22,7 +22,7 @@ natkit only needs an instance role for the keys that call AWS:
 
 The second EC2 statement lets a replacement instance [take the static ENI over](../high-availability/) from the one it replaces; without it, it waits for the ENI.
 
-`autoscaling:SetInstanceHealth` lets an instance whose setup failed [report itself unhealthy](../high-availability/#when-the-replacement-fails) to its Auto Scaling group. Without it, or outside a group, nothing is reported.
+The Auto Scaling statement is for [`lifecycle_hook`](../high-availability/#when-the-replacement-fails): natkit finds its group and completes the group's launch lifecycle hook.
 
 With `cwagent_enabled`, also attach `CloudWatchAgentServerPolicy`.
 

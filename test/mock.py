@@ -1,9 +1,12 @@
-# Mock EC2 IMDSv2 + EC2 Query API + SSM GetParameter + Auto Scaling SetInstanceHealth for test/init.sh. User-data
-# comes from /user-data, if mounted.
+# Mock EC2 IMDSv2 + EC2 Query API + SSM GetParameter + Auto Scaling's lifecycle hook calls for test/init.sh.
+# User-data comes from /user-data, if mounted.
 # The primary ENI's MAC is the test container's (docker run --mac-address); the static ENI appears in the metadata
 # after AttachNetworkInterface. The ENI starts out on an old instance: DescribeNetworkInterfaces shows that attachment
 # (or is denied, with NO_DESCRIBE set), DetachNetworkInterface starts the detach, and the first attach still fails.
 # With ATTACHED set the instance already has it, as after a reboot.
+# Auto Scaling: the instance is in the group natkit-test, Pending and then held by the hook natkit-ready
+# (Pending:Wait); ASG_STATE=InService for an instance already in service, ASG_STATE=none for one in no group;
+# NO_COMPLETE denies CompleteLifecycleAction.
 # GET /_calls lists the EC2 and Auto Scaling actions and their parameters.
 import json, os
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -25,7 +28,8 @@ META = {
 PARAMS = {"/natkit/test/root-hash": "$6$salt$hash", "/natkit/test/plain": "hunter2",
           "/natkit/test/cw": '{"metrics": {"namespace": "natkit"}}', "/natkit/test/notjson": "[1, 2]"}
 OLD_ATTACHMENT = "eni-attach-0ccccccccccccccc"
-calls, attached, attach_tries = [], bool(os.environ.get("ATTACHED")), 0
+calls, attached, attach_tries, describes = [], bool(os.environ.get("ATTACHED")), 0, 0
+IID, GROUP, HOOK = "i-0123456789abcdef0", "natkit-test", "natkit-ready"
 
 
 def ok_xml(action):
@@ -34,6 +38,35 @@ def ok_xml(action):
 
 def err_xml(code, msg):
     return f"<Response><Errors><Error><Code>{code}</Code><Message>{msg}</Message></Error></Errors></Response>".encode()
+
+
+def asg_err(code, msg):  # Auto Scaling's error shape, not EC2's
+    return f"<ErrorResponse><Error><Type>Sender</Type><Code>{code}</Code><Message>{msg}</Message></Error></ErrorResponse>".encode()
+
+
+def asg(action, p):
+    global describes
+    if p.pop("Version", "") != "2011-01-01":
+        return 400, asg_err("ValidationError", "version")
+    calls.append({"Action": action, **p})
+    if action == "DescribeAutoScalingInstances" and p == {"InstanceIds.member.1": IID}:
+        describes += 1
+        state = os.environ.get("ASG_STATE") or ("Pending" if describes == 1 else "Pending:Wait")
+        member = "" if state == "none" else (
+            f"<member><HealthStatus>HEALTHY</HealthStatus><AutoScalingGroupName>{GROUP}</AutoScalingGroupName>"
+            f"<InstanceId>{IID}</InstanceId><LifecycleState>{state}</LifecycleState></member>")
+        return 200, (
+            '<DescribeAutoScalingInstancesResponse xmlns="http://autoscaling.amazonaws.com/doc/2011-01-01/">'
+            f"<DescribeAutoScalingInstancesResult><AutoScalingInstances>{member}</AutoScalingInstances>"
+            "</DescribeAutoScalingInstancesResult></DescribeAutoScalingInstancesResponse>").encode()
+    held = {"AutoScalingGroupName": GROUP, "LifecycleHookName": HOOK, "InstanceId": IID}
+    if action == "RecordLifecycleActionHeartbeat" and p == held:
+        return 200, ok_xml(action)
+    if action == "CompleteLifecycleAction" and p == {**held, "LifecycleActionResult": "CONTINUE"}:
+        if os.environ.get("NO_COMPLETE"):
+            return 403, asg_err("AccessDenied", "not authorized")
+        return 200, ok_xml(action)
+    return 400, asg_err("ValidationError", f"No active Lifecycle Action found with instance ID {IID}")
 
 
 class H(BaseHTTPRequestHandler):
@@ -74,10 +107,7 @@ class H(BaseHTTPRequestHandler):
         p = dict(parse_qsl(body.decode()))
         action = p.pop("Action", "")
         if "/us-east-1/autoscaling/" in auth:
-            ok = action == "SetInstanceHealth" and p == {"Version": "2011-01-01", "InstanceId": "i-0123456789abcdef0",
-                                                         "HealthStatus": "Unhealthy", "ShouldRespectGracePeriod": "false"}
-            calls.append({"Action": action})
-            return self.reply(200 if ok else 400, ok_xml(action) if ok else err_xml("ValidationError", "unexpected"))
+            return self.reply(*asg(action, p))
         if "/us-east-1/ec2/" not in auth:
             return self.reply(403, err_xml("AuthFailure", "wrong service"))
         if p.pop("Version", "") != "2016-11-15":

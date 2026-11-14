@@ -24,13 +24,33 @@ The [OpenTofu module](../opentofu/) sets up this layout. Its Auto Scaling group 
 
 ## When the replacement fails
 
-An instance whose setup fails prints `natkit: FAIL <reason>` on its console and takes neither the ENI nor the EIP. To EC2 it is still a healthy instance, so the Auto Scaling group would go on and terminate the old one, the only one routing.
+To EC2, an instance is healthy as soon as it runs. An Auto Scaling group that goes by that alone would launch a replacement, see it running, and terminate the old instance, even if the new one never came up as a NAT: a setting that natkit refuses, an image that doesn't boot. Nothing would route.
 
-natkit therefore reports itself unhealthy to its group (`autoscaling:SetInstanceHealth`, in the [instance role](../instance-role/)). The group terminates the failed instance and launches another, and the old instance keeps routing until a replacement comes up healthy. A setting that natkit refuses stops the rollout; it doesn't stop egress.
+A launch lifecycle hook closes that gap. The group holds a new instance out of service until natkit completes the hook, and keeps the old instance until then:
 
-- The group keeps launching instances until the configuration is fixed. Each one runs for a minute or two.
-- The failed instances are terminated, so read the reason from their console output: `aws ec2 get-console-output --instance-id <id>`, with the instance ID from the group's activity history. EC2 keeps it for about an hour after the termination.
-- This needs natkit v0.1.4 or later on the new instance. An older image fails without telling the group.
+```yaml
+lifecycle_hook: natkit-ready   # the hook's name
+```
+
+1. natkit finishes its setup, finds its group and checks that it can reach the hook. If it can't, it stops there and takes nothing.
+2. It takes the ENI and the EIP.
+3. It completes the hook. The group puts the instance in service and, after the warmup, terminates the old one.
+
+An instance that never completes the hook is terminated when the hook times out, and the group tries again. The old instance keeps routing in the meantime, so a bad setting stops the rollout, not egress.
+
+- The failed instance stays for the hook's timeout (5 minutes with the module). Its console says why: `natkit: FAIL <reason>`.
+- Auto Scaling slows down the launches when a hook keeps failing.
+- The instance role needs `autoscaling:DescribeAutoScalingInstances`, `autoscaling:RecordLifecycleActionHeartbeat` and `autoscaling:CompleteLifecycleAction`: see [instance role](../instance-role/).
+- With the hook, the takeover permissions are required too: the old instance is not terminated first, so a new one that can't take the ENI over fails instead of waiting.
+
+The [OpenTofu module](../opentofu/) creates the hook and sets the key. For a group of your own:
+
+```sh
+aws autoscaling put-lifecycle-hook --auto-scaling-group-name <group> --lifecycle-hook-name natkit-ready \
+  --lifecycle-transition autoscaling:EC2_INSTANCE_LAUNCHING --heartbeat-timeout 300 --default-result ABANDON
+```
+
+Without the key, natkit doesn't call Auto Scaling at all.
 
 ## One NAT per Availability Zone
 

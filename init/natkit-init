@@ -17,16 +17,17 @@
 #   tcp_max_syn_backlog: 4096
 #   cwagent_enabled: true                 # CloudWatch agent (natkit-cwagent) with the JSON config in this
 #   cwagent_cfg_param_name: /natkit/cw    #   SSM parameter
+#   lifecycle_hook: natkit-ready          # the Auto Scaling group's launch lifecycle hook, completed once the
+#                                         #   instance is ready: until then the group keeps the old instance
 #   console_password: /natkit/root-hash   # SSM parameter: root's crypt hash for the serial console getty
 #
-# AWS calls (EC2, SSM) are signed with the instance role by curl --aws-sigv4. In order: nftables masquerade out of
-# the public interface, forwarding and tuning sysctls, NAT64 (Jool, pool6 64:ff9b::/96), no more module loading,
-# the SSM parameters, and only then the static ENI and the EIP: an instance whose setup fails takes neither.
+# AWS calls (EC2, SSM, Auto Scaling) are signed with the instance role by curl --aws-sigv4. In order: nftables
+# masquerade out of the public interface, forwarding and tuning sysctls, NAT64 (Jool, pool6 64:ff9b::/96), no more
+# module loading, the SSM parameters, and only then the static ENI and the EIP: an instance whose setup fails takes
+# neither. Last, the lifecycle hook: the group puts the instance in service only once all of that worked.
 # One result line goes to the serial console:
 #   natkit: ready, public <if> private <if>, eip <id>|none, nat64 on|off, cwagent on|off
 #   natkit: FAIL <reason>
-# A failed instance also reports itself unhealthy to its Auto Scaling group, if it has one (and the permission to):
-# the group replaces it, and keeps the instance it was going to replace.
 set -eu
 
 IMDS=${NATKIT_IMDS:-http://169.254.169.254/latest} # overrides: test/init.sh
@@ -36,48 +37,13 @@ UD=$RUN/user-data
 JOOL_POOL6=64:ff9b::/96
 console() { echo "natkit: $*" >"$CONSOLE" 2>/dev/null || :; }
 log() { echo "natkit-init: $*"; }
-die() {
-	echo "natkit-init: $*" >&2
-	console "FAIL $*"
-	unhealthy
-	exit 1
-}
+die() { echo "natkit-init: $*" >&2; console "FAIL $*"; exit 1; }
 
 umask 022
 mkdir -p "$RUN"
 # the getty binds this file: it must exist even if the setup fails below, or there'd be no console to see why.
 # Root stays locked until console_password replaces it.
 (umask 077 && echo 'root:*::0:99999:7:::' >"$RUN/getty.shadow")
-
-imds() { curl -fsS -m 5 -H "X-aws-ec2-metadata-token: $T" "$IMDS/$1"; }
-# instance role credentials, fetched once (natkit-init is done long before they expire); status 1 without a role
-creds() {
-	[ -z "${ak:-}" ] || return 0
-	profile=$(imds meta-data/iam/security-credentials/ 2>/dev/null) || return 1
-	c=$(imds "meta-data/iam/security-credentials/$profile") || return 1
-	ak=$(echo "$c" | yq -p json .AccessKeyId)
-	sk=$(echo "$c" | yq -p json .SecretAccessKey)
-	st=$(echo "$c" | yq -p json .Token)
-}
-# signed <service> <curl args...>: curl with SigV4; the credentials go in on stdin (-K -), not on the command line,
-# where /proc would show them
-signed() {
-	svc=$1
-	shift
-	printf 'user = "%s:%s"\nheader = "x-amz-security-token: %s"\n' "$ak" "$sk" "$st" |
-		curl -K - -sS --aws-sigv4 "aws:amz:$region:$svc" "$@"
-}
-# unhealthy (die's): tells the instance's Auto Scaling group to replace it. An instance refresh waits for a healthy
-# replacement before it terminates the old instance, and EC2's own health check passes on an instance whose setup
-# failed: without this the group would terminate the one instance that routes. Best effort: no group, no role or no
-# autoscaling:SetInstanceHealth is not an error.
-unhealthy() {
-	[ -n "${iid:-}" ] && creds || return 0
-	signed autoscaling -f -m 10 -o /dev/null --data-urlencode Action=SetInstanceHealth --data-urlencode Version=2011-01-01 \
-		--data-urlencode "InstanceId=$iid" --data-urlencode HealthStatus=Unhealthy \
-		--data-urlencode ShouldRespectGracePeriod=false "${NATKIT_AUTOSCALING:-https://autoscaling.$region.amazonaws.com/}" 2>/dev/null &&
-		log "reported unhealthy to the Auto Scaling group" || :
-}
 
 # IMDSv2 session token (hop limit 1 is enough: this container shares the host network)
 T=
@@ -86,10 +52,7 @@ for _ in $(seq 30); do
 	sleep 1
 done
 [ -n "$T" ] || die "no instance metadata service"
-region=$(imds meta-data/placement/region)
-iid=$(imds meta-data/instance-id)
-mac=$(imds meta-data/mac)
-primary_eni=$(imds "meta-data/network/interfaces/macs/$mac/interface-id")
+imds() { curl -fsS -m 5 -H "X-aws-ec2-metadata-token: $T" "$IMDS/$1"; }
 
 imds user-data >"$UD" 2>/dev/null || : # 404: no user-data
 [ -s "$UD" ] || echo '{}' >"$UD"
@@ -97,7 +60,7 @@ yq -e 'tag == "!!map"' "$UD" >/dev/null 2>&1 || die "user-data is not a YAML map
 
 # every key known (a typo would silently do nothing), every value in its expected shape
 KEYS="eip_id eni_id interface client_cidrs ip_local_port_range nf_conntrack_max nf_conntrack_buckets nf_conntrack_tcp_timeout_established
-tcp_keepalive_time tcp_max_syn_backlog cwagent_enabled cwagent_cfg_param_name console_password nat64"
+tcp_keepalive_time tcp_max_syn_backlog cwagent_enabled cwagent_cfg_param_name console_password nat64 lifecycle_hook"
 for k in $(yq 'keys | .[]' "$UD"); do
 	echo " $KEYS " | tr '\n' ' ' | grep -q " $k " || die "user-data: unknown key '$k'"
 done
@@ -118,6 +81,7 @@ check cwagent_enabled 'true|false'
 yq -e '.nat64 == null or .nat64 == true or .nat64 == false' "$UD" >/dev/null 2>&1 || die "user-data: nat64: bad value '$(yq .nat64 "$UD")'"
 check cwagent_cfg_param_name '[A-Za-z0-9_./-]+'
 check console_password '[A-Za-z0-9_./-]+'
+check lifecycle_hook '[A-Za-z0-9_/-]{1,255}'
 # client_cidrs: a non-empty list of CIDRs, split by family for nftables (which checks the IPv6 addresses itself).
 # IPv4 octets without leading zeros: nft would read 010.0.0.0/8 as octal, 8.0.0.0/8.
 yq -e '.client_cidrs == null or ((.client_cidrs | tag) == "!!seq" and (.client_cidrs | length) > 0)' "$UD" >/dev/null 2>&1 ||
@@ -138,6 +102,11 @@ set +f
 # blank entries split to no words at all: a list of them would silently forward nothing
 [ "$clients" != true ] || [ -n "$c4$c6" ] || die "user-data: client_cidrs: not a list of CIDRs"
 
+region=$(imds meta-data/placement/region)
+iid=$(imds meta-data/instance-id)
+mac=$(imds meta-data/mac)
+primary_eni=$(imds "meta-data/network/interfaces/macs/$mac/interface-id")
+
 # ifname <mac>: the interface with this MAC (no udev here: no ENI-ID altnames as on Amazon Linux)
 ifname() {
 	for d in /sys/class/net/*; do
@@ -148,25 +117,50 @@ ifname() {
 public=$(ifname "$mac") || die "no interface with the primary ENI's MAC $mac"
 private=$public
 
-# ec2 <Action> [Name=value ...]: an EC2 Query API call. The response XML on stdout; on an error the AWS error code
-# and message on stderr, and status 1.
-ec2() {
-	action=$1
+# instance role credentials, fetched once (natkit-init is done long before they expire)
+creds() {
+	[ -z "${ak:-}" ] || return 0
+	profile=$(imds meta-data/iam/security-credentials/) || die "$1: no instance profile"
+	c=$(imds "meta-data/iam/security-credentials/$profile")
+	ak=$(echo "$c" | yq -p json .AccessKeyId)
+	sk=$(echo "$c" | yq -p json .SecretAccessKey)
+	st=$(echo "$c" | yq -p json .Token)
+}
+# signed <service> <curl args...>: curl with SigV4; the credentials go in on stdin (-K -), not on the command line,
+# where /proc would show them
+signed() {
+	svc=$1
 	shift
-	creds || die "$action: no instance profile"
+	printf 'user = "%s:%s"\nheader = "x-amz-security-token: %s"\n' "$ak" "$sk" "$st" |
+		curl -K - -sS --aws-sigv4 "aws:amz:$region:$svc" "$@"
+}
+
+# query <service> <version> <Action> [Name=value ...]: an AWS Query API call. The response XML on stdout (and left
+# in $RUN/api.out); on an error the AWS error code and message on stderr, and status 1.
+query() {
+	api=$1 version=$2 action=$3
+	shift 3
+	creds "$action"
+	case $api in
+	ec2) url=${NATKIT_EC2:-https://ec2.$region.amazonaws.com/} ;;
+	autoscaling) url=${NATKIT_AUTOSCALING:-https://autoscaling.$region.amazonaws.com/} ;;
+	esac
 	n=$#
 	for p; do set -- "$@" --data-urlencode "$p"; done
 	shift "$n"
-	code=$(signed ec2 -m 20 -o "$RUN/ec2.out" -w '%{http_code}' --data-urlencode "Action=$action" \
-		--data-urlencode Version=2016-11-15 "$@" "${NATKIT_EC2:-https://ec2.$region.amazonaws.com/}") || code=000
+	code=$(signed "$api" -m 20 -o "$RUN/api.out" -w '%{http_code}' --data-urlencode "Action=$action" \
+		--data-urlencode "Version=$version" "$@" "$url") || code=000
 	case $code in
-	2??) cat "$RUN/ec2.out" ;;
+	2??) cat "$RUN/api.out" ;;
 	*)
-		echo "natkit-init: $action: HTTP $code $(yq -p xml '.Response.Errors.Error | .Code + ": " + .Message' "$RUN/ec2.out" 2>/dev/null)" >&2
+		# EC2's errors are <Response><Errors><Error>, Auto Scaling's <ErrorResponse><Error>
+		echo "natkit-init: $action: HTTP $code $(yq -p xml '(.Response.Errors.Error // .ErrorResponse.Error) | .Code + ": " + .Message' "$RUN/api.out" 2>/dev/null)" >&2
 		return 1
 		;;
 	esac
 }
+ec2() { query ec2 2016-11-15 "$@"; }
+asg() { query autoscaling 2011-01-01 "$@"; }
 
 # retry <tries> <what> <command...>: the instance role can take a few seconds to work after launch
 retry() {
@@ -183,7 +177,7 @@ retry() {
 
 # ssm <parameter> <what>: the decrypted value
 ssm() {
-	creds || die "$2: no instance profile"
+	creds "$2"
 	body=$(N=$1 yq -n -o json -I0 '{"Name": strenv(N), "WithDecryption": true}')
 	for i in $(seq 10); do
 		resp=$(signed ssm -f -m 10 -H 'Content-Type: application/x-amz-json-1.1' \
@@ -351,6 +345,36 @@ if [ -n "$cp" ]; then
 fi
 [ "$hash" = '*' ] || (umask 077 && echo "root:$hash::0:99999:7:::" >"$RUN/getty.shadow") # empty lastchg: 0 would force a password change
 
+# lifecycle_hook: a launch lifecycle hook of the Auto Scaling group keeps this instance out of service (Pending:Wait)
+# until natkit completes it, below, as the last thing it does. The group terminates an instance that never does (a
+# setup that failed here, an image that didn't boot) and tries again, and until one completes it keeps the old
+# instance, the one that routes. Without the hook the group only waits for EC2 to call the instance running, and
+# then terminates the old one.
+# Found now, before the ENI: an instance that can't reach its hook could never be put in service, and must not take
+# the ENI from the one that is. The heartbeat proves the hook's name and the permission, and restarts its timeout.
+hook=$(val lifecycle_hook) hook_group=''
+if [ -n "$hook" ]; then
+	m=.DescribeAutoScalingInstancesResponse.DescribeAutoScalingInstancesResult.AutoScalingInstances.member
+	w=0
+	while :; do
+		retry 10 DescribeAutoScalingInstances asg DescribeAutoScalingInstances "InstanceIds.member.1=$iid"
+		state=$(yq -p xml "$m.LifecycleState // \"\"" "$RUN/api.out" 2>/dev/null) || state=''
+		[ "$state" = Pending ] || break # Pending: the group hasn't got to its hooks yet
+		w=$((w + 1))
+		[ "$w" -lt 100 ] || die "lifecycle_hook: still Pending in the Auto Scaling group after 5 min"
+		sleep 3
+	done
+	if [ "$state" = Pending:Wait ]; then
+		hook_group=$(yq -p xml "$m.AutoScalingGroupName" "$RUN/api.out")
+		retry 10 "RecordLifecycleActionHeartbeat $hook" asg RecordLifecycleActionHeartbeat \
+			"AutoScalingGroupName=$hook_group" "LifecycleHookName=$hook" "InstanceId=$iid"
+		log "$hook_group holds this instance out of service until it completes $hook"
+	else
+		# launched before the group had the hook, a reboot, or an instance of no group
+		log "lifecycle_hook: nothing to complete, the instance is ${state:-in no Auto Scaling group}"
+	fi
+fi
+
 # The static ENI and the EIP, last: everything that can fail has not, so an instance whose setup failed never takes
 # the route tables' traffic or the address.
 if [ -n "$eni_id" ]; then
@@ -364,10 +388,17 @@ if [ -n "$eni_id" ]; then
 		# fck-nat waits forever, natkit gives up after 15 min so the console (getty) shows the failure.
 		att=$(ec2 DescribeNetworkInterfaces "NetworkInterfaceId.1=$eni_id" 2>"$RUN/retry.err" |
 			yq -p xml '.DescribeNetworkInterfacesResponse.networkInterfaceSet.item.attachment.attachmentId // ""') || att=''
+		# Held by the lifecycle hook, waiting is no use: the group doesn't terminate the old instance before this
+		# one is in service.
+		stuck="$eni_id: can't take it over (ec2:DescribeNetworkInterfaces, ec2:DetachNetworkInterface), and its instance stays until this one is in service (lifecycle_hook)"
 		if [ -n "$att" ]; then
 			log "taking $eni_id over from its instance ($att)"
-			ec2 DetachNetworkInterface "AttachmentId=$att" Force=true >/dev/null || log "can't detach $att: waiting for it"
+			ec2 DetachNetworkInterface "AttachmentId=$att" Force=true >/dev/null || {
+				[ -z "$hook_group" ] || die "$stuck"
+				log "can't detach $att: waiting for it"
+			}
 		elif [ -s "$RUN/retry.err" ]; then
+			[ -z "$hook_group" ] || die "$stuck"
 			log "can't look up $eni_id's attachment: waiting for it"
 		fi
 		log "attaching $eni_id"
@@ -405,6 +436,13 @@ for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 >"$f"; done
 # a router on one interface would tell clients to bypass it (ICMP redirects); the kernel ORs all with each interface
 for f in /proc/sys/net/ipv4/conf/*/send_redirects; do echo 0 >"$f"; done
 
+# Ready: the group may put this instance in service and, if it replaces one, terminate that one. A failure here
+# leaves an instance that routes but that the group will replace when the hook times out: the console says why.
+if [ -n "$hook_group" ]; then
+	retry 10 "CompleteLifecycleAction $hook" asg CompleteLifecycleAction "AutoScalingGroupName=$hook_group" \
+		"LifecycleHookName=$hook" "InstanceId=$iid" LifecycleActionResult=CONTINUE
+	log "completed $hook: in service"
+fi
 
 console "ready, public $public private $private, eip ${eip_id:-none}, nat64 $nat64, cwagent $cwagent"
 log "done"

@@ -5,8 +5,8 @@
 #     private one the VPC's CIDRs
 #  2. handover: a user-data change refreshes the instance. The replacement launches first and takes the ENI over:
 #     the client may be without egress for at most NATKIT_HANDOVER_MAX seconds (default 30)
-#  3. a replacement whose setup fails (a setting natkit refuses): it reports itself unhealthy, the group replaces
-#     it and not the old instance, and the client's egress never stops; a good setting then goes through
+#  3. a replacement whose setup fails (a setting natkit refuses): it never completes the group's lifecycle hook,
+#     so the group keeps the old instance and the client's egress never stops; a good setting then goes through
 #  4. conntrack alarm: the agent publishes the allowance counters under the group's name, and the alarm exists
 #  5. client_cidrs without the client's subnet, untracked: nothing gets out, IPv4 or NAT64 (natkit's nftables alone)
 #  6. the default client_cidrs, untracked, tcp_established_timeout 350: egress again, both ENIs at 350 s
@@ -154,7 +154,8 @@ echo "NAT $f failed its setup"
 # past the warmup (90 s), after which the group used to terminate the old instance whatever the new one's state
 sleep 150
 nats | grep -qx "$n2" || die "the group terminated $n2, the instance that routes"
-! nats | grep -qx "$f" || die "the group kept $f, whose setup failed"
+st=$(aws autoscaling describe-auto-scaling-instances --instance-ids "$n2" --query 'AutoScalingInstances[0].LifecycleState' --output text)
+[ "$st" = InService ] || die "$n2, the instance that routes, is $st in the group"
 g=$(gap "$s2")
 echo "longest time without egress: $g s"
 [ "$g" -le 10 ] || die "egress stopped for $g s while the replacements failed"
