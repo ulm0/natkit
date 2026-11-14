@@ -76,7 +76,7 @@ yq -e '.nat64 == null or .nat64 == true or .nat64 == false' "$UD" >/dev/null 2>&
 check cwagent_cfg_param_name '[A-Za-z0-9_./-]+'
 check console_password '[A-Za-z0-9_./-]+'
 # client_cidrs: a non-empty list of CIDRs, split by family for nftables (which checks the addresses themselves)
-yq -e '.client_cidrs == null or (.client_cidrs | tag == "!!seq" and length > 0)' "$UD" >/dev/null 2>&1 ||
+yq -e '.client_cidrs == null or ((.client_cidrs | tag) == "!!seq" and (.client_cidrs | length) > 0)' "$UD" >/dev/null 2>&1 ||
 	die "user-data: client_cidrs: not a list of CIDRs"
 clients=$(yq '.client_cidrs != null' "$UD")
 c4='' c6=''
