@@ -14,7 +14,7 @@ When an instance is replaced:
 
 1. The new instance finishes its own setup first: nftables, sysctls, NAT64, its SSM parameters. If any of it fails, it takes neither the ENI nor the EIP.
 2. It takes the ENI. If another instance holds it, natkit detaches it from that one (a forced detach) and attaches it.
-3. Once it has the ENI, it takes the EIP.
+3. Once it has the ENI, it tells its group that it is in service ([`lifecycle_hook`](#when-the-replacement-fails)) and takes the EIP.
 
 The takeover needs `ec2:DescribeNetworkInterfaces` and `ec2:DetachNetworkInterface` in the [instance role](../instance-role/). Without them the new instance retries the attachment until the old one lets go, for up to 15 minutes, as fck-nat does.
 
@@ -33,13 +33,16 @@ lifecycle_hook: natkit-ready   # the hook's name
 ```
 
 1. natkit finishes its setup, finds its group and checks that it can reach the hook. If it can't, it stops there and takes nothing.
-2. It takes the ENI and the EIP.
+2. It takes the ENI. From here on it is the instance that routes.
 3. It completes the hook. The group puts the instance in service and, after the warmup, terminates the old one.
+4. It takes the EIP.
 
-An instance that never completes the hook is terminated when the hook times out, and the group tries again. The old instance keeps routing in the meantime, so a bad setting stops the rollout, not egress.
+An instance that fails before step 2, or never boots, doesn't complete the hook. The group terminates it when the hook times out and launches another. The old instance keeps routing in the meantime, so a bad setting stops the rollout, not egress.
 
 - The failed instance stays for the hook's timeout (5 minutes with the module). Its console says why: `natkit: FAIL <reason>`.
-- Auto Scaling slows down the launches when a hook keeps failing.
+- An instance refresh doesn't try forever: after a while Auto Scaling marks it as failed and stops launching. The old instance stays. Fix the setting and apply again.
+- Each attempt is billed like any instance: its minutes, its volume and its public IPv4 address. Auto Scaling slows the launches down when a hook keeps failing.
+- A failure after step 2 leaves the new instance in service, because it is the only one that can still route. If it can't take the EIP, it egresses from its own public IP and its console says `natkit: FAIL`.
 - The instance role needs `autoscaling:DescribeAutoScalingInstances`, `autoscaling:RecordLifecycleActionHeartbeat` and `autoscaling:CompleteLifecycleAction`: see [instance role](../instance-role/).
 - With the hook, the takeover permissions are required too: the old instance is not terminated first, so a new one that can't take the ENI over fails instead of waiting.
 

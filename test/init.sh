@@ -61,7 +61,7 @@ lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type d
 	natkit-init
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth9, eip eipalloc-0123, nat64 off, cwagent on' ]
 	ip -o link show eth9 | grep -q ',UP'
-	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"DescribeAutoScalingInstances\",\"DescribeAutoScalingInstances\",\"RecordLifecycleActionHeartbeat\",\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"AttachNetworkInterface\",\"AssociateAddress\",\"CompleteLifecycleAction\"]' ]
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"DescribeAutoScalingInstances\",\"DescribeAutoScalingInstances\",\"RecordLifecycleActionHeartbeat\",\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"AttachNetworkInterface\",\"CompleteLifecycleAction\",\"AssociateAddress\"]' ]
 	[ \"\$(tr -s '\t ' ' ' </proc/sys/net/ipv4/ip_local_port_range)\" = '2048 60000' ]
 	[ \$(cat /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_established) = 3600 ]
 	[ \$(cat /proc/sys/net/ipv4/tcp_keepalive_time) = 600 ] && [ \$(cat /proc/sys/net/ipv4/tcp_max_syn_backlog) = 4096 ]
@@ -154,7 +154,7 @@ fails 'client_cidrs: [10.0.0.0/33]' "user-data: client_cidrs: bad value '10.0.0.
 fails 'client_cidrs: [""]' "user-data: client_cidrs: not a list of CIDRs"
 fails 'client_cidrs: ["2600:1f18::/129"]' "user-data: client_cidrs: bad value '2600:1f18::/129'"
 fails 'client_cidrs: ["2600:zz::/56"]' "user-data: client_cidrs: bad value '2600:zz::/56'"
-fails 'eip_id: eipalloc-0bad' "AssociateAddress eipalloc-0bad failed: natkit-init: AssociateAddress: HTTP 400 InvalidParameterValue: unexpected"
+fails 'nf_conntrack_max: 0800000' "user-data: nf_conntrack_max: bad value"
 fails '- a list' "user-data is not a YAML map"
 
 echo "== a setup that fails takes neither the ENI nor the EIP, and leaves the lifecycle hook alone"
@@ -165,6 +165,19 @@ console_password: /natkit/test/plain' "ip link add eth9 address 02:42:ac:11:00:9
 	if natkit-init >/dev/null 2>&1; then exit 1; fi
 	grep -qF 'natkit: FAIL console_password' /tmp/console
 	[ \"\$($calls)\" = '[]' ]"
+
+echo "== a failure after the ENI is taken: the hook is completed all the same, this instance is the one that routes"
+run 'eip_id: eipalloc-0bad
+eni_id: eni-0bbbbbbbbbbbbbbbb
+lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
+	if natkit-init >/dev/null 2>&1; then exit 1; fi
+	grep -qF 'natkit: FAIL AssociateAddress eipalloc-0bad failed: natkit-init: AssociateAddress: HTTP 400 InvalidParameterValue: unexpected' /tmp/console
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action) | unique')\" = '[\"DescribeAutoScalingInstances\",\"RecordLifecycleActionHeartbeat\",\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"CompleteLifecycleAction\",\"AssociateAddress\"]' ]"
+
+echo "== a command that fails outside die still leaves a result line"
+run "" "rm /etc/natkit/sysctl.conf
+	if natkit-init >/dev/null 2>&1; then exit 1; fi
+	grep -q 'natkit: FAIL natkit-init stopped with status' /tmp/console"
 
 echo "== a failed setup still leaves the getty a (locked) shadow file"
 run 'bogus: 1' "if natkit-init 2>/dev/null; then exit 1; fi; [ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]"

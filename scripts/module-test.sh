@@ -156,15 +156,19 @@ sleep 150
 nats | grep -qx "$n2" || die "the group terminated $n2, the instance that routes"
 st=$(aws autoscaling describe-auto-scaling-instances --instance-ids "$n2" --query 'AutoScalingInstances[0].LifecycleState' --output text)
 [ "$st" = InService ] || die "$n2, the instance that routes, is $st in the group"
+# an outage that hasn't ended is no gap between two probes that got through: it must work now
+works "$(seqno)" >/dev/null || die "no egress while the replacement fails"
 g=$(gap "$s2")
 echo "longest time without egress: $g s"
-[ "$g" -le 10 ] || die "egress stopped for $g s while the replacements failed"
+[ "$g" -le 10 ] || die "egress stopped for $g s while the replacement failed"
 export TF_VAR_keepalive=602
 apply 3b
 n2=$(ready "$n2" failed) || die "the replacement isn't ready"
 echo "NAT $n2"
 refreshed || die "the instance refresh didn't finish"
 works "$(seqno)" || die "no egress after the refresh"
+g=$(gap "$s2")
+[ "$g" -le "$MAX" ] || die "egress stopped for $g s on the way back to a good setting"
 
 echo "== 4. conntrack alarm"
 for _ in $(seq 20); do

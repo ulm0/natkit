@@ -24,7 +24,7 @@
 # AWS calls (EC2, SSM, Auto Scaling) are signed with the instance role by curl --aws-sigv4. In order: nftables
 # masquerade out of the public interface, forwarding and tuning sysctls, NAT64 (Jool, pool6 64:ff9b::/96), no more
 # module loading, the SSM parameters, and only then the static ENI and the EIP: an instance whose setup fails takes
-# neither. Last, the lifecycle hook: the group puts the instance in service only once all of that worked.
+# neither. With the ENI, the lifecycle hook: the group puts the instance in service only once it routes.
 # One result line goes to the serial console:
 #   natkit: ready, public <if> private <if>, eip <id>|none, nat64 on|off, cwagent on|off
 #   natkit: FAIL <reason>
@@ -37,10 +37,20 @@ UD=$RUN/user-data
 JOOL_POOL6=64:ff9b::/96
 console() { echo "natkit: $*" >"$CONSOLE" 2>/dev/null || :; }
 log() { echo "natkit-init: $*"; }
-die() { echo "natkit-init: $*" >&2; console "FAIL $*"; exit 1; }
+die() {
+	echo "natkit-init: $*" >&2
+	console "FAIL $*"
+	: >"$RUN/failed"
+	exit 1
+}
 
 umask 022
 mkdir -p "$RUN"
+# A command that fails outside die (set -e) leaves a result line too. Not after a die, whose line is the one that
+# says why: also one that ran in a subshell, which this shell only sees as a failed command (hence the file).
+rm -f "$RUN/failed"
+stopped() { [ "$1" = 0 ] || [ -e "$RUN/failed" ] || console "FAIL natkit-init stopped with status $1: its log has the command"; }
+trap 'stopped $?' EXIT
 # the getty binds this file: it must exist even if the setup fails below, or there'd be no console to see why.
 # Root stays locked until console_password replaces it.
 (umask 077 && echo 'root:*::0:99999:7:::' >"$RUN/getty.shadow")
@@ -73,8 +83,9 @@ check eip_id 'eipalloc-[0-9a-f]+'
 check eni_id 'eni-[0-9a-f]+'
 check interface '[A-Za-z0-9._-]{1,15}'
 check ip_local_port_range '[0-9]+[ 	]+[0-9]+'
+# no leading zeros: the shell's arithmetic would read 0800000 as a (bad) octal number
 for k in nf_conntrack_max nf_conntrack_buckets nf_conntrack_tcp_timeout_established tcp_keepalive_time tcp_max_syn_backlog; do
-	check "$k" '[0-9]+'
+	check "$k" '0|[1-9][0-9]*'
 done
 check cwagent_enabled 'true|false'
 # val's '// ""' reads false as unset: nat64 is the one key where false means something
@@ -346,12 +357,21 @@ fi
 [ "$hash" = '*' ] || (umask 077 && echo "root:$hash::0:99999:7:::" >"$RUN/getty.shadow") # empty lastchg: 0 would force a password change
 
 # lifecycle_hook: a launch lifecycle hook of the Auto Scaling group keeps this instance out of service (Pending:Wait)
-# until natkit completes it, below, as the last thing it does. The group terminates an instance that never does (a
+# until natkit completes it, below, once it has the ENI. The group terminates an instance that never does (a
 # setup that failed here, an image that didn't boot) and tries again, and until one completes it keeps the old
 # instance, the one that routes. Without the hook the group only waits for EC2 to call the instance running, and
 # then terminates the old one.
 # Found now, before the ENI: an instance that can't reach its hook could never be put in service, and must not take
 # the ENI from the one that is. The heartbeat proves the hook's name and the permission, and restarts its timeout.
+# in_service: completes the hook, once. A failure here leaves an instance that routes but that the group will
+# replace when the hook times out: the console says why.
+in_service() {
+	[ -n "$hook_group" ] || return 0
+	retry 10 "CompleteLifecycleAction $hook" asg CompleteLifecycleAction "AutoScalingGroupName=$hook_group" \
+		"LifecycleHookName=$hook" "InstanceId=$iid" LifecycleActionResult=CONTINUE
+	log "completed $hook: in service"
+	hook_group=''
+}
 hook=$(val lifecycle_hook) hook_group=''
 if [ -n "$hook" ]; then
 	m=.DescribeAutoScalingInstancesResponse.DescribeAutoScalingInstancesResult.AutoScalingInstances.member
@@ -421,6 +441,10 @@ if [ -n "$eni_id" ]; then
 	done
 	ip link set dev "$private" up # its address comes from the dhcpcd service; forwarding doesn't need one
 	log "$eni_id is $private"
+	# With the ENI, this instance is the one that routes, whatever happens next: in service now, not after the EIP.
+	# The group must not take a failed AssociateAddress for a reason to terminate it and keep the old instance,
+	# which no longer has the ENI.
+	in_service
 fi
 
 # the EIP last (fck-nat takes it first): a replacement instance waiting for the static ENI must not pull the EIP
@@ -436,13 +460,7 @@ for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 >"$f"; done
 # a router on one interface would tell clients to bypass it (ICMP redirects); the kernel ORs all with each interface
 for f in /proc/sys/net/ipv4/conf/*/send_redirects; do echo 0 >"$f"; done
 
-# Ready: the group may put this instance in service and, if it replaces one, terminate that one. A failure here
-# leaves an instance that routes but that the group will replace when the hook times out: the console says why.
-if [ -n "$hook_group" ]; then
-	retry 10 "CompleteLifecycleAction $hook" asg CompleteLifecycleAction "AutoScalingGroupName=$hook_group" \
-		"LifecycleHookName=$hook" "InstanceId=$iid" LifecycleActionResult=CONTINUE
-	log "completed $hook: in service"
-fi
+in_service # without a static ENI: now that all of it worked
 
 console "ready, public $public private $private, eip ${eip_id:-none}, nat64 $nat64, cwagent $cwagent"
 log "done"

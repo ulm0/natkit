@@ -81,6 +81,7 @@ variable "settings" {
   description = "natkit's tuning keys for the user-data: ip_local_port_range, nf_conntrack_max, nf_conntrack_buckets, nf_conntrack_tcp_timeout_established, tcp_keepalive_time, tcp_max_syn_backlog."
   type        = map(any)
   default     = {}
+  nullable    = false
   # natkit refuses a user-data key it doesn't know, at boot: a typo here would otherwise be a NAT that never comes up
   validation {
     condition = alltrue([for k in keys(var.settings) : contains([
@@ -272,11 +273,13 @@ resource "aws_iam_role_policy" "this" {
         Action   = ["ec2:DescribeNetworkInterfaces", "autoscaling:DescribeAutoScalingInstances"]
         Resource = "*"
         }, {
-        # the group's launch lifecycle hook (aws_autoscaling_lifecycle_hook.ready), which natkit completes when ready
-        Sid      = "ReadyHook"
-        Effect   = "Allow"
-        Action   = ["autoscaling:RecordLifecycleActionHeartbeat", "autoscaling:CompleteLifecycleAction"]
-        Resource = "${local.arn}:autoscaling:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.name}-*"
+        # the group's launch lifecycle hook (aws_autoscaling_lifecycle_hook.ready), which natkit completes when ready.
+        # The group's name is only known as a prefix here; its natkit tag makes it this module's group and no other
+        Sid       = "ReadyHook"
+        Effect    = "Allow"
+        Action    = ["autoscaling:RecordLifecycleActionHeartbeat", "autoscaling:CompleteLifecycleAction"]
+        Resource  = "${local.arn}:autoscaling:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.name}-*"
+        Condition = { StringEquals = { "aws:ResourceTag/natkit" = var.name } }
       }],
       var.eip ? [{
         Sid      = "OwnEip"
@@ -352,7 +355,7 @@ resource "aws_launch_template" "this" {
   # client_cidrs too): the replacement would never be put in service, and the rollout would never finish
   lifecycle {
     precondition {
-      condition     = !can(regex("^natkit-v0\\.1\\.[0-3]-", data.aws_ami.this.name))
+      condition     = !can(regex("^natkit-v0\\.1\\.[0-3]-(arm64|amd64)$", data.aws_ami.this.name)) # the releases' names only
       error_message = "${data.aws_ami.this.name} doesn't know lifecycle_hook, which this module sets: use natkit v0.1.4 or later, the module's own release."
     }
     # the agent's image is pulled into memory: on 0.5 GiB it doesn't fit, and the agent would never start
@@ -385,6 +388,12 @@ resource "aws_autoscaling_group" "this" {
   default_instance_warmup = 90
   instance_refresh {
     strategy = "Rolling"
+  }
+  # the instances get their tags from the launch template; this one is the group's own, for the role's ReadyHook
+  tag {
+    key                 = "natkit"
+    value               = var.name
+    propagate_at_launch = false
   }
   depends_on = [aws_iam_role_policy.this, aws_ssm_parameter.cwagent]
 }
