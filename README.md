@@ -2,7 +2,7 @@
 
 A NAT instance AMI for AWS, arm64 and x86_64: [fck-nat](https://github.com/AndrewGuenther/fck-nat)'s features on
 [LinuxKit](https://github.com/linuxkit/linuxkit) instead of Amazon Linux, systemd and Packer. The OS is an immutable
-image with a read-only root: a minimal kernel ([lk-kernel](https://github.com/ulm0/lk-kernel), shared with yagan and limakit), containerd, and a handful of service containers. There's no package
+in-memory image: a minimal kernel ([lk-kernel](https://github.com/ulm0/lk-kernel), shared with yagan and limakit), containerd, and a handful of service containers. There's no package
 manager, SSH or SSM agent.
 
 Docs: [natkit.ulm0.com](https://natkit.ulm0.com).
@@ -110,8 +110,9 @@ where you can.
 The CloudWatch agent image (~150 MB unpacked) is pulled from `public.ecr.aws` through the NAT's own egress and kept
 in memory.
 
-Instance size: 0.5 GiB of memory is enough (`t4g.nano` on arm64, `t3.nano` or `t3a.nano` on amd64). The CloudWatch
-agent needs 1 GiB (`t4g.micro`, `t3.micro`): its image doesn't fit in a nano's memory.
+Instance size: 0.5 GiB of memory is enough (`t4g.nano` on arm64, `t3.nano` or `t3a.nano` on amd64). At boot the
+read-only root (a 66 MB squashfs) is copied from the EBS volume into memory, which is all natkit reads from the disk.
+The CloudWatch agent needs 1 GiB (`t4g.micro`, `t3.micro`): its image doesn't fit in a nano's memory.
 
 ## Hardening
 

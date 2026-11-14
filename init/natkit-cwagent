@@ -1,6 +1,6 @@
 #!/bin/sh
 # natkit-cwagent (service): the CloudWatch agent, only when natkit-init wrote its config (user-data cwagent_enabled).
-# Not in the image, which would grow by ~150 MB for every NAT instance. Pulled by digest (into /var, a tmpfs) through the
+# Not in the image: it would sit in RAM (~150+ MB unpacked) on every NAT instance. Pulled by digest through the
 # system containerd (the host's ctr, bound in) into its own namespace, run in the host network with the config at
 # /etc/cwagentconfig, the agent image's container config directory. Restarted if it exits.
 set -u
