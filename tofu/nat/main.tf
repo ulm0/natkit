@@ -367,7 +367,7 @@ resource "aws_launch_template" "this" {
   lifecycle {
     precondition {
       condition     = !can(regex("^natkit-v0\\.1\\.[0-3]-(arm64|amd64)$", data.aws_ami.this.name)) # the releases' names only
-      error_message = "${data.aws_ami.this.name} doesn't know lifecycle_hook, which this module sets: use natkit v0.1.4 or later, the module's own release."
+      error_message = "${data.aws_ami.this.name} doesn't know lifecycle_hook, which this module sets: use natkit v0.1.5 or later, the module's own release."
     }
     # the agent's image is pulled into memory: on 0.5 GiB it doesn't fit, and the agent would never start
     precondition {

@@ -23,7 +23,7 @@ The AMIs aren't public. Import a [release](https://github.com/ulm0/natkit/releas
 account and region (or [build it](#building)):
 
 ```sh
-V=v0.1.4 ARCH=arm64 # or amd64
+V=v0.1.5 ARCH=arm64 # or amd64
 curl -fsSLO "https://github.com/ulm0/natkit/releases/download/$V/natkit-$V-$ARCH-efi.img.gz"
 gunzip "natkit-$V-$ARCH-efi.img.gz"
 AWS_REGION=us-east-1 NATKIT_BUCKET=my-import-bucket scripts/ami.sh "natkit-$V-$ARCH-efi.img" $ARCH "natkit-$V-$ARCH"
@@ -88,11 +88,11 @@ the `64:ff9b::/96` routes and the ENI's IPv6 address), and `client_cidrs` defaul
 
 ```hcl
 module "nat" {
-  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.4"
+  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.5"
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-v0.1.4-arm64: the same release as the module
+  ami_id          = "ami-..." # natkit-v0.1.5-arm64: the same release as the module
   settings        = { nf_conntrack_max = "262144" }
 }
 ```

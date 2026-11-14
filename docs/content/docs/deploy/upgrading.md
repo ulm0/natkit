@@ -6,13 +6,13 @@ weight: 40
 
 With the [OpenTofu module](/docs/deploy/opentofu/), a new AMI, new user-data or a change to the primary ENI's security group replaces the instance through an instance refresh of its Auto Scaling group. The replacement launches first, sets itself up and then [takes the ENI over](/docs/how-it-works/high-availability/): egress stops for the handover (14 seconds in a test), and the connections open at that moment are cut. The group puts the new instance in service when natkit completes the [lifecycle hook](/docs/how-it-works/high-availability/#when-the-replacement-fails), and terminates the old one 90 seconds later. A replacement that fails its setup is never put in service, and the old instance stays.
 
-Upgrade the module and the AMI together, from the same release. The module refuses an AMI that doesn't know the keys it sets: from v0.1.4 it sets `lifecycle_hook`, so it refuses the releases up to v0.1.3.
+Upgrade the module and the AMI together, from the same release. The module refuses an AMI that doesn't know the keys it sets: from v0.1.5 it sets `lifecycle_hook`, so it refuses the releases up to v0.1.3.
 
 Without the module, launch an instance from the new AMI in place of the old one; with an Auto Scaling group of your own, put the new AMI in its launch template and start an instance refresh.
 
-## To v0.1.4
+## To v0.1.5
 
-With the module:
+v0.1.4 was tagged but not released: its amd64 boot test failed, and v0.1.5 fixes the cause. From v0.1.3, with the module:
 
 - The instance is replaced once: its user-data changes.
 - The lifecycle hook is created along with that first replacement, so it may not hold it yet. It holds every one after.

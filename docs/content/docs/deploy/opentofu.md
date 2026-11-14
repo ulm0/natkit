@@ -14,11 +14,11 @@ aliases: [/docs/opentofu/]
 
 ```hcl
 module "nat" {
-  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.4"
+  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.5"
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-v0.1.4-arm64: the same release as the module
+  ami_id          = "ami-..." # natkit-v0.1.5-arm64: the same release as the module
   instance_type   = "t4g.micro"
   settings        = { nf_conntrack_max = "262144" }
 }

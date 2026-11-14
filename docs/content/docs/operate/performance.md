@@ -39,7 +39,7 @@ Through natkit on a `t4g.nano`, static ENI tracked:
 | 80 000 connections | 24 000 per second, none failed |
 | 160 000 connections | stalls: EC2 drops packets, and the [alarm](/docs/operate/monitoring/#alarms) went off |
 
-The nano did as well as the micro: EC2 allows it as many tracked connections. Its kernel's table held 109 000 connections at the peak, and at least 225 MB of its 0.5 GiB stayed available. Before v0.1.4, natkit sized that table at 55 000 on a nano: it filled first, every connection of the 80 000 burst failed, and the allowance metrics showed nothing.
+The nano did as well as the micro: EC2 allows it as many tracked connections. Its kernel's table held 109 000 connections at the peak, and at least 225 MB of its 0.5 GiB stayed available. Before v0.1.5, natkit sized that table at 55 000 on a nano: it filled first, every connection of the 80 000 burst failed, and the allowance metrics showed nothing.
 
 ## What limits a NAT instance
 

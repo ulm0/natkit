@@ -12,7 +12,7 @@ natkit runs from an AMI in your own account. Import it, pick an instance size, a
 The AMIs aren't public. Import a [release](https://github.com/ulm0/natkit/releases)'s disk image into your own account and region, or [build it](/docs/develop/building/):
 
 ```sh
-V=v0.1.4 ARCH=arm64 # or amd64
+V=v0.1.5 ARCH=arm64 # or amd64
 curl -fsSLO "https://github.com/ulm0/natkit/releases/download/$V/natkit-$V-$ARCH-efi.img.gz"
 gunzip "natkit-$V-$ARCH-efi.img.gz"
 AWS_REGION=us-east-1 NATKIT_BUCKET=my-import-bucket scripts/ami.sh "natkit-$V-$ARCH-efi.img" $ARCH "natkit-$V-$ARCH"
