@@ -12,8 +12,10 @@ say() { echo "natkit-cwagent: $*" | tee -a "${NATKIT_CONSOLE:-/dev/console}" >&2
 
 [ -f "$CONF/cwagentconfig.json" ] || { echo "natkit-cwagent: not enabled"; exit 0; }
 
-until err=$(ctr image pull "$IMAGE" 2>&1 >/dev/null); do
-	say "pull failed, retrying: $(printf '%s' "$err" | tail -n 1)"
+# 5 min a try: a pull whose connection died (the public address changes when the EIP arrives) otherwise hangs for as
+# long as TCP keeps retransmitting, with nothing on the console
+until err=$(timeout 300 /usr/bin/ctr -n natkit image pull "$IMAGE" 2>&1 >/dev/null); do
+	say "pull failed, retrying: $(printf '%s' "${err:-no answer in 5 min}" | tail -n 1)"
 	sleep 10
 done
 say "pulled $IMAGE"
