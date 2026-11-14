@@ -45,7 +45,7 @@ Without user-data, natkit is a plain NAT out of the primary ENI. For the HA layo
 
 0.5 GiB of memory is enough. At boot natkit copies its read-only root, a 66 MB squashfs, from the EBS volume into memory, and doesn't read the volume again. The [CloudWatch agent](../cloudwatch/) needs 1 GiB (`t4g.micro`, `t3.micro`).
 
-A smaller instance also has smaller limits. See [Performance](../performance/), and [Costs](../costs/) for what each size and everything around it is billed.
+A smaller instance can also have smaller limits: a `t3.nano` tracks 25 000 connections, a `t4g.nano` as many as a `t4g.micro`. See [Performance](../performance/), and [Costs](../costs/) for what each size and everything around it is billed.
 
 ## Check that it's up
 

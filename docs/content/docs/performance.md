@@ -13,10 +13,11 @@ A load test in `us-east-1` put a client in a private subnet, natkit in between, 
 
 | Through natkit on | 1 stream | 8 streams, up | 8 streams, down |
 |---|---|---|---|
+| `t4g.nano` | 1.8 to 3.2 Gbit/s | 3.3 to 3.6 Gbit/s | 2.2 to 2.5 Gbit/s |
 | `t4g.micro` | 1.6 to 2.4 Gbit/s | 2.0 to 3.4 Gbit/s | 1.6 to 2.3 Gbit/s |
 | `c7gn.medium` | 4.8 Gbit/s | 4.8 Gbit/s | 4.8 Gbit/s |
 
-The `t4g.micro` figures are burst rates. Its baseline bandwidth is far lower, and a sustained transfer falls back to it once the network credits run out.
+The `t4g` figures are burst rates. Its baseline bandwidth is far lower, and a sustained transfer falls back to it once the network credits run out.
 
 ## New connections
 
@@ -29,6 +30,16 @@ The `t4g.micro` figures are burst rates. Its baseline bandwidth is far lower, an
 | 200 000 connections | stalls; 0.2% failed, 1 100 per second on average | |
 
 During the stalls the instance was not busy: at least 83% of its CPU was idle and a quarter of its memory was in use. The limit was EC2's.
+
+Through natkit on a `t4g.nano`, static ENI tracked:
+
+| Burst | |
+|---|---|
+| 40 000 connections | 24 000 per second, none failed |
+| 80 000 connections | 24 000 per second, none failed |
+| 160 000 connections | stalls: EC2 drops packets, and the [alarm](#watch-the-limit) went off |
+
+The nano did as well as the micro: EC2 allows it as many tracked connections. Its kernel's table held 109 000 connections at the peak, and at least 225 MB of its 0.5 GiB stayed available. Before v0.1.4, natkit sized that table at 55 000 on a nano: it filled first, every connection of the 80 000 burst failed, and the allowance metrics showed nothing.
 
 ## What limits a NAT instance
 
