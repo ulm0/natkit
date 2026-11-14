@@ -2,7 +2,7 @@ kernel:
   # github.com/ulm0/lk-kernel (one kernel for natkit, yagan and limakit), pinned by digest: a new build
   # there reaches natkit only through a (Renovate) PR here. Multi-arch (arm64, amd64): linuxkit build --arch
   # picks the platform.
-  image: ghcr.io/ulm0/lk-kernel:6.18.63@sha256:3ec177d959b7a88fcb3b1baffb91c0d10d6db1f2d868ac1d37abeae504f0b208
+  image: ghcr.io/ulm0/lk-kernel:6.18.63@sha256:bb4896a429aab2ea5fa307b9451c248651f4c1e8532e5611a203d160a5265581
   # SPCR only gives earlycon; console=ttyS0 registers the real console, or userspace logs nothing to the serial
   # port. EBS volumes must never time out (AWS's recommended nvme_core.io_timeout). The root is a squashfs
   # partition that scripts/disk.sh's initramfs copies into memory.
