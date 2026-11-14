@@ -239,7 +239,7 @@ run "" "natkit-cwagent | grep -qx 'natkit-cwagent: not enabled'"
 echo "== the image: one natkit binary under its three names, and no shell tooling (it lives in RAM)"
 docker run --rm --entrypoint /bin/sh "$IMG" -c 'for n in natkit-init natkit-metrics natkit-cwagent; do
 	[ "$(readlink /usr/bin/$n)" = natkit ] || exit 1; done
-	natkit version | grep -q . && ! command -v curl && ! command -v yq && ! command -v ip' >/dev/null ||
+	natkit version | grep -q . && for p in curl yq-go iproute2; do ! apk info -e $p || exit 1; done' >/dev/null ||
 	{ echo "FAIL: the image's natkit binary or its contents"; exit 1; }
 
 echo "== the jool tool matches the modules' version"
