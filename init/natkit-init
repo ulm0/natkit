@@ -252,16 +252,6 @@ table inet natkit {
 EOF
 log "masquerading out of $public${c4:+, clients $c4}${c6:+, clients $c6}"
 
-# EC2's connection-tracking allowance for this instance type: flows past it are dropped before they reach natkit.
-# Read now, before the clients' traffic, so it's the whole allowance. On the console next to the kernel's table,
-# but not as "natkit: ": that prefix is the one result line.
-a=$(ethtool -S "$public" 2>/dev/null | awk '$1 == "conntrack_allowance_available:" { print $2 }')
-if [ -n "$a" ]; then
-	l="EC2 conntrack allowance $a, nf_conntrack_max $(cat /proc/sys/net/netfilter/nf_conntrack_max)"
-	log "$l"
-	echo "natkit-init: $l" >"$CONSOLE" 2>/dev/null || :
-fi
-
 # forwarding, rp_filter and hardening (init/sysctl.conf): a key that doesn't take is a failed boot, not a NAT that
 # quietly doesn't forward. Written straight to /proc/sys: busybox's `sysctl -p` exits 0 on a bad key. Under
 # test/init.sh only the net.* keys (the container's own): the rest are the docker host's kernel.
@@ -288,6 +278,16 @@ s net.netfilter.nf_conntrack_tcp_timeout_established "$(val nf_conntrack_tcp_tim
 s net.ipv4.tcp_keepalive_time "$(val tcp_keepalive_time)"
 s net.ipv4.tcp_max_syn_backlog "$(val tcp_max_syn_backlog)"
 [ -z "$b" ] || echo "$b" >/sys/module/nf_conntrack/parameters/hashsize || die "nf_conntrack_buckets=$b"
+
+# EC2's connection-tracking allowance for this instance type: flows past it are dropped before they reach natkit.
+# Read now, before the ENI brings the clients' traffic, so it's the whole allowance, and after the tuning, so the
+# kernel's table next to it is the one in use. Not as "natkit: ": that prefix is the one result line.
+a=$(ethtool -S "$public" 2>/dev/null | awk '$1 == "conntrack_allowance_available:" { print $2 }')
+if [ -n "$a" ]; then
+	l="EC2 conntrack allowance $a, nf_conntrack_max $(cat /proc/sys/net/netfilter/nf_conntrack_max)"
+	log "$l"
+	echo "natkit-init: $l" >"$CONSOLE" 2>/dev/null || :
+fi
 
 # NAT64: Jool's modules (the jool image in natkit.yml's init) and its userspace tool (this image), same version.
 # With client_cidrs, address-dependent filtering: by default Jool lets any IPv4 host reach a client's mapping

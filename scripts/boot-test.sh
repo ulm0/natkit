@@ -126,6 +126,9 @@ l=$(line "$a" 'natkit: ') || die "A: no natkit line on the console after 15 min"
 echo "A: $l"
 wa=$(echo "$want" | sed 's/nat64 on/nat64 off/')
 [ "$l" = "$wa" ] || die "A: want '$wa'"
+# the tuning took, and the allowance line shows it
+console "$a" | tr -d '\r' | grep -a -q 'natkit-init: EC2 conntrack allowance [0-9]*, nf_conntrack_max 131072$' ||
+	die "A: no 'EC2 conntrack allowance ..., nf_conntrack_max 131072' on the console"
 
 # 3. the client
 case $ARCH in arm64) p=arm64 ;; amd64) p=x86_64 ;; esac
