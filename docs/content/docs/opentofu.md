@@ -70,5 +70,5 @@ Upgrading to v0.1.4:
 
 - The instance is replaced once: its user-data changes.
 - The lifecycle hook is created along with that first replacement, so it may not hold it yet. It holds every one after.
-- With `instance_profile`, add the Auto Scaling actions of the [instance role](../instance-role/) to your role first. Without them the new instance fails its setup, and the old one keeps routing.
+- With `instance_profile`, add the Auto Scaling actions of the [instance role](../instance-role/) to your role before you apply, and the takeover actions (`ec2:DescribeNetworkInterfaces`, `ec2:DetachNetworkInterface`) if it doesn't have them. Without them the new instance fails its setup, and if the hook doesn't hold this first replacement yet, the group still terminates the old instance after the warmup: nothing routes.
 - From v0.1.1 or earlier, the upgrade also splits the one security group into two.

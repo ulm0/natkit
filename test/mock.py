@@ -6,7 +6,9 @@
 # With ATTACHED set the instance already has it, as after a reboot.
 # Auto Scaling: the instance is in the group natkit-test, Pending and then held by the hook natkit-ready
 # (Pending:Wait); ASG_STATE=InService for an instance already in service, ASG_STATE=none for one in no group;
-# NO_COMPLETE denies CompleteLifecycleAction. NO_REGION: the metadata has no region.
+# NO_COMPLETE denies CompleteLifecycleAction. NO_REGION: the metadata has no region. THROTTLE: the first
+# DescribeNetworkInterfaces and the first DetachNetworkInterface are throttled. CREDS_LATE: the instance role's
+# credentials are missing the first time they're asked for, as right after launch.
 # GET /_calls lists the EC2 and Auto Scaling actions and their parameters.
 import json, os
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -29,6 +31,7 @@ PARAMS = {"/natkit/test/root-hash": "$6$salt$hash", "/natkit/test/plain": "hunte
           "/natkit/test/cw": '{"metrics": {"namespace": "natkit"}}', "/natkit/test/notjson": "[1, 2]"}
 OLD_ATTACHMENT = "eni-attach-0ccccccccccccccc"
 calls, attached, attach_tries, describes = [], bool(os.environ.get("ATTACHED")), 0, 0
+throttled, creds_asked = set(), 0
 IID, GROUP, HOOK = "i-0123456789abcdef0", "natkit-test", "natkit-ready"
 
 
@@ -80,6 +83,7 @@ class H(BaseHTTPRequestHandler):
         self.reply(200 if ok else 400, TOKEN.encode() if ok else b"")
 
     def do_GET(self):
+        global creds_asked
         if self.path == "/_calls":
             return self.reply(200, json.dumps(calls).encode())
         if self.headers.get("X-aws-ec2-metadata-token") != TOKEN:
@@ -93,6 +97,10 @@ class H(BaseHTTPRequestHandler):
             return self.reply(200, (MAC + "/\n" + (STATIC_MAC + "/" if attached else "")).encode())
         if key == "meta-data/placement/region" and os.environ.get("NO_REGION"):
             return self.reply(404)
+        if key == "meta-data/iam/security-credentials/natkit":
+            creds_asked += 1
+            if os.environ.get("CREDS_LATE") and creds_asked == 1:
+                return self.reply(404)
         self.reply(200, META[key].encode()) if key in META else self.reply(404)
 
     def do_POST(self):  # EC2 and SSM: SigV4-signed with the session token
@@ -115,6 +123,9 @@ class H(BaseHTTPRequestHandler):
         if p.pop("Version", "") != "2016-11-15":
             return self.reply(400, err_xml("InvalidParameterValue", "version"))
         calls.append({"Action": action, **p})
+        if os.environ.get("THROTTLE") and action in ("DescribeNetworkInterfaces", "DetachNetworkInterface") and action not in throttled:
+            throttled.add(action)
+            return self.reply(503, err_xml("RequestLimitExceeded", "Request limit exceeded."))
         if action == "AssociateAddress" and p == {"AllocationId": "eipalloc-0123", "NetworkInterfaceId": ENI, "AllowReassociation": "true"}:
             return self.reply(200, ok_xml(action))
         if action == "ModifyNetworkInterfaceAttribute" and p == {"NetworkInterfaceId": ENI, "SourceDestCheck.Value": "false"}:

@@ -399,8 +399,8 @@ resource "aws_autoscaling_group" "this" {
 }
 
 # A new instance is in service when natkit says so, not when EC2 calls it running: the hook holds it in Pending:Wait
-# until natkit-init completes it, with its setup done and the ENI and the EIP taken. One that never does (a setting
-# natkit refuses, an image that doesn't boot) is terminated when the hook times out and the group tries again;
+# until natkit-init completes it, with its setup done and the ENI taken (the EIP follows). One that never does (a
+# setting natkit refuses, an image that doesn't boot) is terminated when the hook times out and the group tries again;
 # meanwhile the old instance, still in service, keeps routing. Without the hook the group would terminate the old
 # instance after the warmup, whatever became of the new one.
 # A resource of its own, not the group's initial_lifecycle_hook: that one only takes at the group's creation, and

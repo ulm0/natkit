@@ -128,14 +128,16 @@ ifname() {
 public=$(ifname "$mac") || die "no interface with the primary ENI's MAC $mac"
 private=$public
 
-# instance role credentials, fetched once (natkit-init is done long before they expire)
+# instance role credentials, fetched once (natkit-init is done long before they expire). Right after launch they
+# can be missing for a moment: then nothing is kept, status 1, and the caller's next try fetches them again.
 creds() {
 	[ -z "${ak:-}" ] || return 0
-	profile=$(imds meta-data/iam/security-credentials/) || die "$1: no instance profile"
-	c=$(imds "meta-data/iam/security-credentials/$profile")
-	ak=$(echo "$c" | yq -p json .AccessKeyId)
-	sk=$(echo "$c" | yq -p json .SecretAccessKey)
-	st=$(echo "$c" | yq -p json .Token)
+	if profile=$(imds meta-data/iam/security-credentials/) && c=$(imds "meta-data/iam/security-credentials/$profile"); then
+		ak=$(echo "$c" | yq -p json '.AccessKeyId // ""')
+		sk=$(echo "$c" | yq -p json '.SecretAccessKey // ""')
+		st=$(echo "$c" | yq -p json '.Token // ""')
+	fi
+	[ -n "${ak:-}" ] || { echo "natkit-init: $1: no instance role credentials (an instance profile?)" >&2; return 1; }
 }
 # signed <service> <curl args...>: curl with SigV4; the credentials go in on stdin (-K -), not on the command line,
 # where /proc would show them
@@ -151,7 +153,7 @@ signed() {
 query() {
 	api=$1 version=$2 action=$3
 	shift 3
-	creds "$action"
+	creds "$action" || return 1
 	case $api in
 	ec2) url=${NATKIT_EC2:-https://ec2.$region.amazonaws.com/} ;;
 	autoscaling) url=${NATKIT_AUTOSCALING:-https://autoscaling.$region.amazonaws.com/} ;;
@@ -188,10 +190,9 @@ retry() {
 
 # ssm <parameter> <what>: the decrypted value
 ssm() {
-	creds "$2"
 	body=$(N=$1 yq -n -o json -I0 '{"Name": strenv(N), "WithDecryption": true}')
 	for i in $(seq 10); do
-		resp=$(signed ssm -f -m 10 -H 'Content-Type: application/x-amz-json-1.1' \
+		creds "$2" && resp=$(signed ssm -f -m 10 -H 'Content-Type: application/x-amz-json-1.1' \
 			-H 'X-Amz-Target: AmazonSSM.GetParameter' -d "$body" "${NATKIT_SSM:-https://ssm.$region.amazonaws.com/}") && break
 		[ "$i" = 10 ] && die "ssm: can't read $1 for $2"
 		sleep 3
@@ -406,20 +407,30 @@ if [ -n "$eni_id" ]; then
 		# is on its way out and needn't agree), so egress stops for the detach and attach only, not for the old
 		# instance's shutdown or this one's boot. Without the permissions to, wait for the ENI as fck-nat does;
 		# fck-nat waits forever, natkit gives up after 15 min so the console (getty) shows the failure.
-		att=$(ec2 DescribeNetworkInterfaces "NetworkInterfaceId.1=$eni_id" 2>"$RUN/retry.err" |
-			yq -p xml '.DescribeNetworkInterfacesResponse.networkInterfaceSet.item.attachment.attachmentId // ""') || att=''
-		# Held by the lifecycle hook, waiting is no use: the group doesn't terminate the old instance before this
-		# one is in service.
-		stuck="$eni_id: can't take it over (ec2:DescribeNetworkInterfaces, ec2:DetachNetworkInterface), and its instance stays until this one is in service (lifecycle_hook)"
-		if [ -n "$att" ]; then
-			log "taking $eni_id over from its instance ($att)"
-			ec2 DetachNetworkInterface "AttachmentId=$att" Force=true >/dev/null || {
-				[ -z "$hook_group" ] || die "$stuck"
-				log "can't detach $att: waiting for it"
-			}
-		elif [ -s "$RUN/retry.err" ]; then
-			[ -z "$hook_group" ] || die "$stuck"
-			log "can't look up $eni_id's attachment: waiting for it"
+		attq='.DescribeNetworkInterfacesResponse.networkInterfaceSet.item.attachment.attachmentId // ""'
+		if [ -n "$hook_group" ]; then
+			# Held by the lifecycle hook, waiting is no use: the group doesn't terminate the old instance before this
+			# one is in service. Retried as the other calls (throttling, or a detach still in progress), then a failure.
+			i=0
+			while :; do
+				att=$(ec2 DescribeNetworkInterfaces "NetworkInterfaceId.1=$eni_id" 2>"$RUN/retry.err" | yq -p xml "$attq") || att=''
+				if [ ! -s "$RUN/retry.err" ]; then
+					[ -n "$att" ] || break
+					log "taking $eni_id over from its instance ($att)"
+					ec2 DetachNetworkInterface "AttachmentId=$att" Force=true >/dev/null 2>"$RUN/retry.err" && break
+				fi
+				i=$((i + 1))
+				[ "$i" -lt 10 ] || die "$eni_id: can't take it over, and its instance stays until this one is in service (lifecycle_hook): $(tr '\n' ' ' <"$RUN/retry.err")"
+				sleep 3
+			done
+		else
+			att=$(ec2 DescribeNetworkInterfaces "NetworkInterfaceId.1=$eni_id" 2>"$RUN/retry.err" | yq -p xml "$attq") || att=''
+			if [ -n "$att" ]; then
+				log "taking $eni_id over from its instance ($att)"
+				ec2 DetachNetworkInterface "AttachmentId=$att" Force=true >/dev/null || log "can't detach $att: waiting for it"
+			elif [ -s "$RUN/retry.err" ]; then
+				log "can't look up $eni_id's attachment: waiting for it"
+			fi
 		fi
 		log "attaching $eni_id"
 		i=0

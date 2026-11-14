@@ -14,8 +14,11 @@ run() {
 	docker rm -f natkit-mock >/dev/null 2>&1 || :
 	[ -z "$1" ] || printf '%s\n' "$1" >test/.user-data.yaml
 	docker run -d --name natkit-mock --network "$NET" -e "NO_DESCRIBE=${NO_DESCRIBE:-}" -e "ATTACHED=${ATTACHED:-}" \
-		-e "ASG_STATE=${ASG_STATE:-}" -e "NO_COMPLETE=${NO_COMPLETE:-}" -e "NO_REGION=${NO_REGION:-}" -v "$PWD/test/mock.py:/mock.py:ro" \
-		${1:+-v "$PWD/test/.user-data.yaml:/user-data:ro"} python:3.13-alpine python /mock.py >/dev/null
+		-e "ASG_STATE=${ASG_STATE:-}" -e "NO_COMPLETE=${NO_COMPLETE:-}" -e "NO_REGION=${NO_REGION:-}" -e "THROTTLE=${THROTTLE:-}" \
+		-e "CREDS_LATE=${CREDS_LATE:-}" \
+		-v "$PWD/test/mock.py:/mock.py:ro" ${1:+-v "$PWD/test/.user-data.yaml:/user-data:ro"} python:3.13-alpine python /mock.py >/dev/null
+	# a case's `X=1 run ...` outlives the call in some shells (macOS's /bin/sh): the mock has them, the next case mustn't
+	unset NO_DESCRIBE ATTACHED ASG_STATE NO_COMPLETE NO_REGION THROTTLE CREDS_LATE
 	sleep 1
 	# by IP: natkit-init's `flush ruleset` also removes docker's embedded-DNS rules in this container
 	mock=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' natkit-mock)
@@ -101,8 +104,20 @@ echo "== lifecycle_hook: held by the hook, an ENI it can't take over is a failur
 NO_DESCRIBE=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb
 lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
 	if natkit-init >/dev/null 2>&1; then exit 1; fi
-	grep -qF \"natkit: FAIL eni-0bbbbbbbbbbbbbbbb: can't take it over\" /tmp/console
+	grep -qF \"natkit: FAIL eni-0bbbbbbbbbbbbbbbb: can't take it over, and its instance stays until this one is in service (lifecycle_hook): natkit-init: DescribeNetworkInterfaces: HTTP 403 UnauthorizedOperation: not authorized\" /tmp/console
 	if $calls | grep -q AttachNetworkInterface; then exit 1; fi"
+
+echo "== lifecycle_hook: held by the hook, a throttled lookup or detach is tried again"
+THROTTLE=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb
+lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
+	natkit-init
+	grep -q 'natkit: ready' /tmp/console
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action) | map(select(test(\"NetworkInterfaces?\$\")))')\" = '[\"DescribeNetworkInterfaces\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"AttachNetworkInterface\"]' ]"
+
+echo "== the instance role's credentials, missing at first: fetched again on the next try"
+CREDS_LATE=1 run 'eip_id: eipalloc-0123' "natkit-init
+	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth0, eip eipalloc-0123, nat64 off, cwagent off' ]
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"AssociateAddress\"]' ]"
 
 echo "== lifecycle_hook: a hook it can't complete is a failure the console shows"
 NO_COMPLETE=1 run 'lifecycle_hook: natkit-ready' "if natkit-init >/dev/null 2>&1; then exit 1; fi

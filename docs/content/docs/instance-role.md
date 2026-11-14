@@ -20,7 +20,7 @@ natkit only needs an instance role for the keys that call AWS:
 }
 ```
 
-The second EC2 statement lets a replacement instance [take the static ENI over](../high-availability/) from the one it replaces; without it, it waits for the ENI.
+The second EC2 statement lets a replacement instance [take the static ENI over](../high-availability/) from the one it replaces; without it, it waits for the ENI, or with `lifecycle_hook` (the module sets it) fails its setup.
 
 The Auto Scaling statement is for [`lifecycle_hook`](../high-availability/#when-the-replacement-fails): natkit finds its group and completes the group's launch lifecycle hook.
 
