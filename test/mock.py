@@ -6,7 +6,7 @@
 # With ATTACHED set the instance already has it, as after a reboot.
 # Auto Scaling: the instance is in the group natkit-test, Pending and then held by the hook natkit-ready
 # (Pending:Wait); ASG_STATE=InService for an instance already in service, ASG_STATE=none for one in no group;
-# NO_COMPLETE denies CompleteLifecycleAction.
+# NO_COMPLETE denies CompleteLifecycleAction. NO_REGION: the metadata has no region.
 # GET /_calls lists the EC2 and Auto Scaling actions and their parameters.
 import json, os
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -91,6 +91,8 @@ class H(BaseHTTPRequestHandler):
             return self.reply(200, open("/user-data", "rb").read())
         if key == "meta-data/network/interfaces/macs/":
             return self.reply(200, (MAC + "/\n" + (STATIC_MAC + "/" if attached else "")).encode())
+        if key == "meta-data/placement/region" and os.environ.get("NO_REGION"):
+            return self.reply(404)
         self.reply(200, META[key].encode()) if key in META else self.reply(404)
 
     def do_POST(self):  # EC2 and SSM: SigV4-signed with the session token

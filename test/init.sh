@@ -14,7 +14,7 @@ run() {
 	docker rm -f natkit-mock >/dev/null 2>&1 || :
 	[ -z "$1" ] || printf '%s\n' "$1" >test/.user-data.yaml
 	docker run -d --name natkit-mock --network "$NET" -e "NO_DESCRIBE=${NO_DESCRIBE:-}" -e "ATTACHED=${ATTACHED:-}" \
-		-e "ASG_STATE=${ASG_STATE:-}" -e "NO_COMPLETE=${NO_COMPLETE:-}" -v "$PWD/test/mock.py:/mock.py:ro" \
+		-e "ASG_STATE=${ASG_STATE:-}" -e "NO_COMPLETE=${NO_COMPLETE:-}" -e "NO_REGION=${NO_REGION:-}" -v "$PWD/test/mock.py:/mock.py:ro" \
 		${1:+-v "$PWD/test/.user-data.yaml:/user-data:ro"} python:3.13-alpine python /mock.py >/dev/null
 	sleep 1
 	# by IP: natkit-init's `flush ruleset` also removes docker's embedded-DNS rules in this container
@@ -174,9 +174,8 @@ lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type d
 	grep -qF 'natkit: FAIL AssociateAddress eipalloc-0bad failed: natkit-init: AssociateAddress: HTTP 400 InvalidParameterValue: unexpected' /tmp/console
 	[ \"\$($calls | yq -p json -o json -I0 'map(.Action) | unique')\" = '[\"DescribeAutoScalingInstances\",\"RecordLifecycleActionHeartbeat\",\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"CompleteLifecycleAction\",\"AssociateAddress\"]' ]"
 
-echo "== a command that fails outside die still leaves a result line"
-run "" "rm /etc/natkit/sysctl.conf
-	if natkit-init >/dev/null 2>&1; then exit 1; fi
+echo "== a command that fails outside die (here, reading the region) still leaves a result line"
+NO_REGION=1 run "" "if natkit-init >/dev/null 2>&1; then exit 1; fi
 	grep -q 'natkit: FAIL natkit-init stopped with status' /tmp/console"
 
 echo "== a failed setup still leaves the getty a (locked) shadow file"
