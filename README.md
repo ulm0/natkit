@@ -148,20 +148,21 @@ make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vm
 
 `.github/workflows/build.yml` builds both architectures on every push. Tags (`v*`) and manual runs also register
 the AMIs and run `scripts/boot-test.sh`: an EIP, a static ENI, a client in a private subnet whose egress must be the
-EIP, a handover to a second instance, CloudWatch agent metrics, and NAT64 when the test subnets have IPv6. Then
-`scripts/module-test.sh` applies `tofu/nat` (arm64): the handover's time without egress, the conntrack alarm's
-metric, `client_cidrs`, `untracked` and the idle timeout.
+EIP, a handover to a second instance, CloudWatch agent metrics, NAT64 when the test subnets have IPv6, and a 0.5 GiB
+instance with its root in memory and the allowance metrics. Then
+`scripts/module-test.sh` applies `tofu/nat` (arm64): the handover's time without egress, a replacement that fails,
+the conntrack alarm's metric, `client_cidrs`, `untracked` and the idle timeout.
 `tofu/ci` creates the role, test VPC and instance profile and outputs these repository variables (set `AWS_ROLE_ARN` as a secret
 instead: it holds the account ID, and the run logs are public):
 
 | Variable | |
 |---|---|
-| `AWS_ROLE_ARN` (secret) | GitHub OIDC role, assumable only from `main` and `v*` tags: S3 + `ec2:ImportSnapshot`/`RegisterImage`, `ec2:DeregisterImage`/`DeleteSnapshot` on what it tagged `natkit.io/release` (per-commit AMIs are pruned after each run), and for the boot test EC2 instances, EIPs, ENIs, routes, `ssm:PutParameter`/`DeleteParameter` under `/natkit/boot-test/`, `iam:PassRole` for the test profile, `cloudwatch:GetMetricStatistics` |
+| `AWS_ROLE_ARN` (secret) | GitHub OIDC role, assumable only from `main` and `v*` tags. It imports and registers AMIs and deletes the ones it tagged `natkit.io/release` (per-commit AMIs are pruned after each run). For the tests it creates instances, EIPs, ENIs, security groups, a launch template, an Auto Scaling group and an alarm, all with a test's tag, and changes or deletes only what carries one or is in the test VPC. `iam:PassRole` for the test profile only |
 | `AWS_REGION` | the region for everything |
 | `NATKIT_BUCKET` | S3 bucket for image imports |
 | `NATKIT_TEST_PUBLIC_SUBNET` | subnet with an internet gateway route |
 | `NATKIT_TEST_PRIVATE_SUBNET` | same AZ, its own route table, no other egress: the boot test owns its default route |
-| `NATKIT_TEST_INSTANCE_PROFILE` | the instance role above + `CloudWatchAgentServerPolicy` |
+| `NATKIT_TEST_INSTANCE_PROFILE` | the instance role above, limited to the test VPC's interfaces, instances with this profile and EIPs a test tagged, + `cloudwatch:PutMetricData` |
 
 ## License
 
