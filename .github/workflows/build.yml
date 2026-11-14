@@ -7,17 +7,20 @@
 #   ami     on v* tags or a manual run: a UEFI AMI per arch named natkit-<tag|sha>-<arch>, tagged natkit.io/release
 #           (scripts/ami.sh), then the end-to-end boot test (scripts/boot-test.sh), one arch at a time (they share
 #           the test subnet's route table), and on arm64 the OpenTofu module's test (scripts/module-test.sh)
-#   release on v* tags, once both AMIs pass: the GitHub release
+#   release on v* tags, once both AMIs pass: the GitHub release, then the AMIs of lower releases are deregistered
 # Repo secret: AWS_ROLE_ARN (GitHub OIDC role; a secret so the account ID stays out of the public logs).
 # Repo variables: AWS_REGION, NATKIT_BUCKET, NATKIT_TEST_PUBLIC_SUBNET,
 # NATKIT_TEST_PRIVATE_SUBNET, NATKIT_TEST_INSTANCE_PROFILE.
 name: build
 
+# not for a change to the docs alone (docs.yml): tags always run, path filters don't apply to them
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore: ["docs/**", "**.md"]
   pull_request:
+    paths-ignore: ["docs/**", "**.md"]
   workflow_dispatch:
     inputs:
       boot_test:
@@ -178,14 +181,6 @@ jobs:
             tofu -chdir="$d" init -backend=false -input=false >/dev/null
             tofu -chdir="$d" validate
           done
-      - name: the OpenTofu module page's Inputs and Outputs match tofu/nat (terraform-docs tofu/nat writes them)
-        uses: docker://quay.io/terraform-docs/terraform-docs:0.25.1@sha256:7b2a74a2b9a9e6af41200335da47b73a64c39a0edd5afb91bc921f0a77eae681
-        with:
-          args: --output-check tofu/nat
-      - name: the VPC module page's example is examples/vpc (terraform-docs examples/vpc writes it)
-        uses: docker://quay.io/terraform-docs/terraform-docs:0.25.1@sha256:7b2a74a2b9a9e6af41200335da47b73a64c39a0edd5afb91bc921f0a77eae681
-        with:
-          args: --output-check examples/vpc
 
   ami:
     needs: [image, tofu]
@@ -366,3 +361,15 @@ jobs:
           for arch in arm64 amd64; do gzip -9 <"out/natkit-$arch-efi.img" >"natkit-$TAG-$arch-efi.img.gz"; done
           sha256sum natkit-"$TAG"-*-efi.img.gz >SHA256SUMS
           gh release upload "$TAG" --clobber natkit-"$TAG"-*-efi.img.gz SHA256SUMS
+      # only the latest release's AMIs stay: once this one is out, those of every lower version go (not a higher
+      # one's, for a fix to an older release)
+      - name: prune earlier releases' AMIs
+        run: |
+          aws ec2 describe-images --owners self --output text --filters Name=tag-key,Values=natkit.io/release \
+            --query 'Images[].[ImageId,Name]' | while read -r ami name; do
+            case $name in natkit-v*-arm64 | natkit-v*-amd64) ;; *) continue ;; esac
+            v=${name#natkit-} && v=${v%-*}
+            [ "$v" != "$TAG" ] && [ "$(printf '%s\n%s\n' "$v" "$TAG" | sort -V | head -n 1)" = "$v" ] || continue
+            echo "deregistering $ami ($name) and its snapshots"
+            aws ec2 deregister-image --image-id "$ami" --delete-associated-snapshots >/dev/null
+          done

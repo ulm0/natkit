@@ -37,7 +37,7 @@ variable "name" {
   default     = "natkit"
 }
 variable "instance_type" {
-  description = "0.5 GiB of memory is enough (`t4g.nano`, `t3.nano`); the CloudWatch agent (`cwagent_cfg_param_name`) needs 1 GiB, and the module refuses a `*.nano` with it. See [instance size](https://natkit.ulm0.com/docs/getting-started/#instance-size)."
+  description = "0.5 GiB of memory is enough (`t4g.nano`, `t3.nano`); the CloudWatch agent (`cwagent_cfg_param_name`) needs 1 GiB, and the module refuses a `*.nano` with it. See [instance size](https://natkit.ulm0.com/docs/start/getting-started/#instance-size)."
   type        = string
   default     = "t4g.micro"
 }
@@ -47,7 +47,7 @@ variable "eip" {
   default     = true
 }
 variable "nat64" {
-  description = "Route `64:ff9b::/96` to the ENI and give it an IPv6 address (the subnet needs an IPv6 CIDR). Pair with Route 53 Resolver DNS64: see [NAT64](https://natkit.ulm0.com/docs/nat64/)."
+  description = "Route `64:ff9b::/96` to the ENI and give it an IPv6 address (the subnet needs an IPv6 CIDR). Pair with Route 53 Resolver DNS64: see [NAT64](https://natkit.ulm0.com/docs/how-it-works/nat64/)."
   type        = bool
   default     = false
 }
@@ -57,7 +57,7 @@ variable "ipv6_cidr" {
   default     = null
 }
 variable "client_cidrs" {
-  description = "Sources that may route through the NAT, IPv4 and IPv6, in canonical form. Enforced by the static ENI's security group (unless `untracked`) and by natkit's nftables ([`client_cidrs`](https://natkit.ulm0.com/docs/configuration/)). Default: the VPC's IPv4 CIDRs, plus `ipv6_cidr`."
+  description = "Sources that may route through the NAT, IPv4 and IPv6, in canonical form. Enforced by the static ENI's security group (unless `untracked`) and by natkit's nftables ([`client_cidrs`](https://natkit.ulm0.com/docs/reference/configuration/)). Default: the VPC's IPv4 CIDRs, plus `ipv6_cidr`."
   type        = list(string)
   default     = null
   validation {
@@ -66,12 +66,12 @@ variable "client_cidrs" {
   }
 }
 variable "untracked" {
-  description = "Open the static ENI's security group to all traffic, so EC2 doesn't track the flows through it: about twice the connections before EC2's per-instance allowance runs out. `client_cidrs` is then enforced by natkit's nftables only. See [Performance](https://natkit.ulm0.com/docs/performance/)."
+  description = "Open the static ENI's security group to all traffic, so EC2 doesn't track the flows through it: about twice the connections before EC2's per-instance allowance runs out. `client_cidrs` is then enforced by natkit's nftables only. See [Performance](https://natkit.ulm0.com/docs/operate/performance/)."
   type        = bool
   default     = false
 }
 variable "tcp_established_timeout" {
-  description = "EC2's idle timeout, in seconds (60 to 432000), for established TCP connections it tracks on both ENIs. Default: EC2's (432000, or 350 on Nitro v6 instances). 350 matches NAT Gateway and frees the allowance from abandoned connections sooner. Going back to `null` leaves the static ENI at its last value: set EC2's default explicitly instead. See [Performance](https://natkit.ulm0.com/docs/performance/)."
+  description = "EC2's idle timeout, in seconds (60 to 432000), for established TCP connections it tracks on both ENIs. Default: EC2's (432000, or 350 on Nitro v6 instances). 350 matches NAT Gateway and frees the allowance from abandoned connections sooner. Going back to `null` leaves the static ENI at its last value: set EC2's default explicitly instead. See [Performance](https://natkit.ulm0.com/docs/operate/performance/)."
   type        = number
   default     = null
   validation {
@@ -80,7 +80,7 @@ variable "tcp_established_timeout" {
   }
 }
 variable "settings" {
-  description = "natkit's tuning [user-data keys](https://natkit.ulm0.com/docs/configuration/): `ip_local_port_range`, `nf_conntrack_max`, `nf_conntrack_buckets`, `nf_conntrack_tcp_timeout_established`, `tcp_keepalive_time`, `tcp_max_syn_backlog`. Any other key is refused at plan time."
+  description = "natkit's tuning [user-data keys](https://natkit.ulm0.com/docs/reference/configuration/): `ip_local_port_range`, `nf_conntrack_max`, `nf_conntrack_buckets`, `nf_conntrack_tcp_timeout_established`, `tcp_keepalive_time`, `tcp_max_syn_backlog`. Any other key is refused at plan time."
   type        = map(any)
   default     = {}
   nullable    = false
@@ -94,17 +94,17 @@ variable "settings" {
   }
 }
 variable "cwagent_cfg_param_name" {
-  description = "SSM parameter with a [CloudWatch agent](https://natkit.ulm0.com/docs/cloudwatch/) JSON config: enables the agent. Needs 1 GiB of memory: a micro or larger."
+  description = "SSM parameter with a [CloudWatch agent](https://natkit.ulm0.com/docs/operate/monitoring/) JSON config: enables the agent. Needs 1 GiB of memory: a micro or larger."
   type        = string
   default     = null
 }
 variable "conntrack_alarm_actions" {
-  description = "Alarm when EC2 drops packets because the instance's [connection-tracking allowance](https://natkit.ulm0.com/docs/performance/) ran out, and when the NAT stops reporting, with these actions (SNS topic ARNs; `[]` for an alarm without any). natkit publishes the ENA driver's allowance counters itself ([`metrics`](https://natkit.ulm0.com/docs/cloudwatch/#allowance-metrics)), without the CloudWatch agent. CloudWatch bills the two metrics, the requests and the alarm: see [Costs](https://natkit.ulm0.com/docs/costs/)."
+  description = "Alarm when EC2 drops packets because the instance's [connection-tracking allowance](https://natkit.ulm0.com/docs/operate/performance/) ran out, and when the NAT stops reporting, with these actions (SNS topic ARNs; `[]` for an alarm without any). natkit publishes the ENA driver's allowance counters itself ([`metrics`](https://natkit.ulm0.com/docs/operate/monitoring/#allowance-metrics)), without the CloudWatch agent. CloudWatch bills the two metrics, the requests and the alarm: see [Costs](https://natkit.ulm0.com/docs/operate/costs/)."
   type        = list(string)
   default     = null
 }
 variable "instance_profile" {
-  description = "Name of an existing instance profile to use instead of the module's role, where IAM is managed elsewhere. Its role needs the [instance role](https://natkit.ulm0.com/docs/instance-role/)'s permissions."
+  description = "Name of an existing instance profile to use instead of the module's role, where IAM is managed elsewhere. Its role needs the [instance role](https://natkit.ulm0.com/docs/reference/instance-role/)'s permissions."
   type        = string
   default     = null
 }
@@ -367,7 +367,7 @@ resource "aws_launch_template" "this" {
   lifecycle {
     precondition {
       condition     = !can(regex("^natkit-v0\\.1\\.[0-3]-(arm64|amd64)$", data.aws_ami.this.name)) # the releases' names only
-      error_message = "${data.aws_ami.this.name} doesn't know lifecycle_hook, which this module sets: use natkit v0.1.4 or later, the module's own release."
+      error_message = "${data.aws_ami.this.name} doesn't know lifecycle_hook, which this module sets: use natkit v0.1.5 or later, the module's own release."
     }
     # the agent's image is pulled into memory: on 0.5 GiB it doesn't fit, and the agent would never start
     precondition {
