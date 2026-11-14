@@ -3,8 +3,9 @@ title: Monitoring
 description: EC2's allowance counters and their alarm without an agent, or the CloudWatch agent.
 weight: 10
 aliases: [/docs/cloudwatch/]
-icon: monitoring
 ---
+
+Two ways to watch natkit in CloudWatch: the allowance metrics natkit publishes itself, with their alarm, and the CloudWatch agent for everything else.
 
 ## Allowance metrics
 

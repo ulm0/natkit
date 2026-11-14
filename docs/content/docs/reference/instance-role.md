@@ -3,7 +3,6 @@ title: Instance role
 description: The IAM permissions natkit needs.
 weight: 20
 aliases: [/docs/instance-role/]
-icon: badge
 ---
 
 natkit only needs an instance role for the keys that call AWS:

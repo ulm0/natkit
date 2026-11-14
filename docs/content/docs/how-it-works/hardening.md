@@ -3,7 +3,6 @@ title: Hardening
 description: What natkit leaves out and locks down.
 weight: 30
 aliases: [/docs/hardening/]
-icon: shield
 ---
 
 - **Login:** no SSH, SSM agent or package manager. The only login is the EC2 Serial Console. It stays locked unless `console_password` is set.

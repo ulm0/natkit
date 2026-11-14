@@ -3,7 +3,6 @@ title: High availability
 description: An Auto Scaling group of one, a static ENI and an EIP.
 weight: 10
 aliases: [/docs/high-availability/]
-icon: sync_alt
 ---
 
 For HA, run natkit in an Auto Scaling group of one, with `eni_id` and `eip_id` in its user-data:

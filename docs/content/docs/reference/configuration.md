@@ -3,7 +3,6 @@ title: Configuration
 description: The YAML user-data keys.
 weight: 10
 aliases: [/docs/configuration/]
-icon: tune
 ---
 
 natkit reads its settings from YAML user-data, with the same keys as fck-nat's `/etc/fck-nat.conf`. Every key is optional: with none at all, natkit is a plain NAT out of the primary ENI.

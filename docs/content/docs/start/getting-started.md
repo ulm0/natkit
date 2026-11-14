@@ -3,7 +3,6 @@ title: Getting started
 description: Import the AMI, pick an instance size, and check that it's up.
 weight: 20
 aliases: [/docs/getting-started/]
-icon: rocket_launch
 ---
 
 natkit runs from an AMI in your own account. Import it, pick an instance size, and deploy it with the [OpenTofu module](/docs/deploy/opentofu/) or [by hand](/docs/deploy/by-hand/).

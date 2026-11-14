@@ -13,11 +13,14 @@
 # NATKIT_TEST_PRIVATE_SUBNET, NATKIT_TEST_INSTANCE_PROFILE.
 name: build
 
+# not for a change to the docs alone (docs.yml): tags always run, path filters don't apply to them
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore: ["docs/**", "**.md"]
   pull_request:
+    paths-ignore: ["docs/**", "**.md"]
   workflow_dispatch:
     inputs:
       boot_test:
@@ -178,14 +181,6 @@ jobs:
             tofu -chdir="$d" init -backend=false -input=false >/dev/null
             tofu -chdir="$d" validate
           done
-      - name: the OpenTofu module page's Inputs and Outputs match tofu/nat (terraform-docs tofu/nat writes them)
-        uses: docker://quay.io/terraform-docs/terraform-docs:0.25.1@sha256:7b2a74a2b9a9e6af41200335da47b73a64c39a0edd5afb91bc921f0a77eae681
-        with:
-          args: --output-check tofu/nat
-      - name: the VPC module page's example is examples/vpc (terraform-docs examples/vpc writes it)
-        uses: docker://quay.io/terraform-docs/terraform-docs:0.25.1@sha256:7b2a74a2b9a9e6af41200335da47b73a64c39a0edd5afb91bc921f0a77eae681
-        with:
-          args: --output-check examples/vpc
 
   ami:
     needs: [image, tofu]

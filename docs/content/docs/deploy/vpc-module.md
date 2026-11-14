@@ -3,7 +3,6 @@ title: With the VPC module
 description: natkit's module next to terraform-aws-modules/vpc.
 weight: 20
 aliases: [/docs/vpc-module/]
-icon: lan
 ---
 
 The community [VPC module](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws) makes the VPC, its subnets and route tables. Leave its NAT gateways off (`enable_nat_gateway = false`) and give natkit's [OpenTofu module](/docs/deploy/opentofu/) its outputs:

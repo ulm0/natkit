@@ -3,7 +3,6 @@ title: OpenTofu module
 description: tofu/nat sets up the HA layout.
 weight: 10
 aliases: [/docs/opentofu/]
-icon: deployed_code
 ---
 
 `tofu/nat` sets up the [HA layout](/docs/how-it-works/high-availability/) as a module:

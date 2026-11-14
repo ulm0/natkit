@@ -2,7 +2,6 @@
 title: Overview
 description: What natkit is, and the ways to run it.
 weight: 10
-icon: info
 ---
 
 natkit is a NAT instance AMI for AWS, built for arm64 and x86_64. It has [fck-nat](https://github.com/AndrewGuenther/fck-nat)'s features on [LinuxKit](https://github.com/linuxkit/linuxkit) instead of Amazon Linux, systemd and Packer. The OS is an immutable in-memory image:

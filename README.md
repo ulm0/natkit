@@ -152,7 +152,7 @@ hugo --source docs && python3 docs/check-links.py docs/public   # the docs site,
 
 ## CI
 
-`.github/workflows/build.yml` builds both architectures on every push. Tags (`v*`) and manual runs also register
+`.github/workflows/build.yml` builds both architectures on every push that changes more than the docs. Tags (`v*`) and manual runs also register
 the AMIs and run `scripts/boot-test.sh`: an EIP, a static ENI, a client in a private subnet whose egress must be the
 EIP, a handover to a second instance, CloudWatch agent metrics, NAT64 when the test subnets have IPv6, and a 0.5 GiB
 instance with its root in memory and the allowance metrics. Then

@@ -3,7 +3,6 @@ title: NAT64
 description: Jool translates 64:ff9b::/96 for IPv6-only subnets.
 weight: 20
 aliases: [/docs/nat64/]
-icon: swap_horiz
 ---
 
 NAT64 is on unless the user-data sets `nat64: false`. [Jool](https://nicmx.github.io/Jool/) translates `64:ff9b::/96` to IPv4.

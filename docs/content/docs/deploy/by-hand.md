@@ -2,7 +2,6 @@
 title: By hand
 description: One instance from the console or the CLI, or an Auto Scaling group of your own.
 weight: 30
-icon: handyman
 ---
 
 Without the [OpenTofu module](/docs/deploy/opentofu/), launch the AMI yourself:

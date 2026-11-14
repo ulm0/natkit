@@ -3,7 +3,6 @@ title: Costs
 description: Everything a natkit deployment is billed for, and the same traffic through a NAT gateway.
 weight: 30
 aliases: [/docs/costs/]
-icon: payments
 ---
 
 natkit is free. AWS bills what it runs on.

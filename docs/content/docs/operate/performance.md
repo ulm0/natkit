@@ -3,7 +3,6 @@ title: Performance
 description: What a load test measured, and what limits a NAT instance.
 weight: 20
 aliases: [/docs/performance/]
-icon: speed
 ---
 
 A load test in `us-east-1` put a client in a private subnet, natkit in between, and a server reached by its public IP. Client and server were `c7g.xlarge`; without the NAT they exchanged 12.4 Gbit/s and 137 000 new connections per second.

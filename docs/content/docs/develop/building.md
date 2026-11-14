@@ -3,7 +3,6 @@ title: Building
 description: Build the image and AMI, and how CI tests them.
 weight: 10
 aliases: [/docs/building/]
-icon: build
 ---
 
 Everything builds natively for the Docker daemon's architecture (arm64 or amd64):
@@ -20,7 +19,7 @@ hugo --source docs && python3 docs/check-links.py docs/public   # the docs site,
 
 ## CI
 
-`.github/workflows/build.yml` builds both architectures on every push. Tags (`v*`) and manual runs also register the AMIs and run `scripts/boot-test.sh`, which checks:
+`.github/workflows/build.yml` builds both architectures on every push that changes more than the docs (`.github/workflows/docs.yml` builds and checks those). Tags (`v*`) and manual runs also register the AMIs and run `scripts/boot-test.sh`, which checks:
 
 - an EIP and a static ENI;
 - a client in a private subnet whose egress must be the EIP;
