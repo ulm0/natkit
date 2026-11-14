@@ -92,6 +92,21 @@ services:
         minor: 1
         mode: "0600"
     command: ["/usr/bin/natkit-cwagent"]
+  # EC2's connection-tracking allowance counters to CloudWatch, only with user-data metrics (init/natkit-metrics):
+  # a shell loop and one signed request a minute. Otherwise it exits at once.
+  - name: metrics
+    image: ghcr.io/ulm0/natkit/init:latest
+    net: host
+    binds:
+      - /run/natkit:/run/natkit:ro
+      - /etc/resolv.conf:/etc/resolv.conf
+    devices: # when it starts and stops publishing goes on the serial console
+      - path: /dev/console
+        type: c
+        major: 5
+        minor: 1
+        mode: "0600"
+    command: ["/usr/bin/natkit-metrics"]
 files:
   - path: etc/linuxkit.yml
     metadata: yaml

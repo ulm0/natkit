@@ -15,6 +15,8 @@
 #   nf_conntrack_tcp_timeout_established: 86400
 #   tcp_keepalive_time: 600
 #   tcp_max_syn_backlog: 4096
+#   metrics: nat-a                        # EC2's conntrack allowance counters to CloudWatch (natkit-metrics),
+#                                         #   namespace natkit, dimension Name=nat-a; no agent
 #   cwagent_enabled: true                 # CloudWatch agent (natkit-cwagent) with the JSON config in this
 #   cwagent_cfg_param_name: /natkit/cw    #   SSM parameter
 #   lifecycle_hook: natkit-ready          # the Auto Scaling group's launch lifecycle hook, completed once the
@@ -70,7 +72,7 @@ yq -e 'tag == "!!map"' "$UD" >/dev/null 2>&1 || die "user-data is not a YAML map
 
 # every key known (a typo would silently do nothing), every value in its expected shape
 KEYS="eip_id eni_id interface client_cidrs ip_local_port_range nf_conntrack_max nf_conntrack_buckets nf_conntrack_tcp_timeout_established
-tcp_keepalive_time tcp_max_syn_backlog cwagent_enabled cwagent_cfg_param_name console_password nat64 lifecycle_hook"
+tcp_keepalive_time tcp_max_syn_backlog cwagent_enabled cwagent_cfg_param_name console_password nat64 lifecycle_hook metrics"
 for k in $(yq 'keys | .[]' "$UD"); do
 	echo " $KEYS " | tr '\n' ' ' | grep -q " $k " || die "user-data: unknown key '$k'"
 done
@@ -88,6 +90,7 @@ for k in nf_conntrack_max nf_conntrack_buckets nf_conntrack_tcp_timeout_establis
 	check "$k" '0|[1-9][0-9]*'
 done
 check cwagent_enabled 'true|false'
+check metrics '[A-Za-z0-9._-]{1,255}'
 # val's '// ""' reads false as unset: nat64 is the one key where false means something
 yq -e '.nat64 == null or .nat64 == true or .nat64 == false' "$UD" >/dev/null 2>&1 || die "user-data: nat64: bad value '$(yq .nat64 "$UD")'"
 check cwagent_cfg_param_name '[A-Za-z0-9_./-]+'
@@ -310,6 +313,12 @@ if [ -n "$a" ]; then
 	l="EC2 conntrack allowance $a, nf_conntrack_max $(cat /proc/sys/net/netfilter/nf_conntrack_max)"
 	log "$l"
 	echo "natkit-init: $l" >"$CONSOLE" 2>/dev/null || :
+fi
+# metrics: natkit-metrics (a service) publishes the allowance counters when this file, with the name, exists
+rm -f "$RUN/metrics"
+if [ -n "$(val metrics)" ]; then
+	[ -n "$a" ] || die "metrics: no conntrack_allowance counters on $public (not an ENA interface?)"
+	val metrics >"$RUN/metrics"
 fi
 
 # NAT64: Jool's modules (the jool image in natkit.yml's init) and its userspace tool (this image), same version.

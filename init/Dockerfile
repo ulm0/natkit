@@ -12,7 +12,7 @@ FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5
 # curl --aws-sigv4 signs the EC2 and SSM calls: no aws-cli (~100 MB) in an image that lives in RAM
 RUN apk add --no-cache curl yq-go nftables iproute2 libnl3 ethtool
 COPY --from=jool /out/usr/bin/jool /usr/bin/jool
-COPY natkit-init natkit-cwagent /usr/bin/
+COPY natkit-init natkit-cwagent natkit-metrics /usr/bin/
 COPY sysctl.conf /etc/natkit/sysctl.conf
 LABEL org.opencontainers.image.source=https://github.com/ulm0/natkit
 ENTRYPOINT ["/usr/bin/natkit-init"]

@@ -24,6 +24,6 @@ The second EC2 statement lets a replacement instance [take the static ENI over](
 
 The Auto Scaling statement is for [`lifecycle_hook`](../high-availability/#when-the-replacement-fails): natkit finds its group and completes the group's launch lifecycle hook.
 
-With `cwagent_enabled`, also attach `CloudWatchAgentServerPolicy`.
+With `metrics`, add `cloudwatch:PutMetricData`; the condition `cloudwatch:namespace = natkit` limits it to natkit's namespace. With `cwagent_enabled`, also attach `CloudWatchAgentServerPolicy`.
 
 Scope `Resource` down to your EIP, ENI and instances where you can. The [OpenTofu module](../opentofu/)'s role does this: tag conditions on the ENIs and instances, and the one EIP and SSM parameters by ARN.

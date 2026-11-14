@@ -24,7 +24,9 @@ run() {
 	mock=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' natkit-mock)
 	docker run --rm --privileged --network "$NET" --mac-address 02:42:ac:11:00:99 -e "MOCK=$mock" \
 		-e "NATKIT_IMDS=http://$mock:8080/latest" -e "NATKIT_EC2=http://$mock:8080/" \
-		-e "NATKIT_SSM=http://$mock:8080/" -e "NATKIT_AUTOSCALING=http://$mock:8080/" -e NATKIT_CONSOLE=/tmp/console \
+		-e "NATKIT_SSM=http://$mock:8080/" -e "NATKIT_AUTOSCALING=http://$mock:8080/" \
+		-e "NATKIT_CLOUDWATCH=http://$mock:8080/" -e NATKIT_CONSOLE=/tmp/console \
+		-e "ENA=${ENA:-}" -v "$PWD/test/ethtool:/usr/local/bin/ethtool:ro" \
 		--entrypoint /bin/sh "$IMG" -c "set -e; $2"
 }
 # fails <user-data> <console reason>: natkit-init must exit non-zero and put the reason on the console
@@ -48,7 +50,8 @@ run "" "natkit-init
 	[ \$(cat /proc/sys/net/ipv4/conf/all/accept_redirects) = 0 ]
 	[ \$(cat /proc/sys/net/ipv4/conf/all/rp_filter) = 0 ] && [ \$(cat /proc/sys/net/ipv4/conf/eth0/rp_filter) = 0 ]
 	[ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]
-	[ \"\$($calls)\" = '[]' ] && [ ! -e /run/natkit/cwagent ]"
+	[ \"\$($calls)\" = '[]' ] && [ ! -e /run/natkit/cwagent ]
+	natkit-metrics | grep -q 'not enabled'"
 
 echo "== everything: EIP, static ENI (taken over from an old instance), tuning, CloudWatch agent, console password, lifecycle hook"
 run 'eip_id: eipalloc-0123
@@ -145,6 +148,21 @@ run 'client_cidrs: [192.168.0.0/24]' "natkit-init
 	nft list set inet natkit clients4 | grep -q 'elements = { 192.168.0.0/24 }'
 	if nft list set inet natkit clients6 | grep -q elements; then exit 1; fi"
 
+echo "== metrics: the packets dropped since the last report, on every interface, go to CloudWatch under that name"
+# test/ethtool: eth0 and eth9 have the counters; the first cycle is where the counting starts (0), the second
+# reports the increase on both (3 + 2)
+ENA=1 run 'metrics: nat-a' "ip link add eth9 type dummy
+	natkit-init
+	NATKIT_METRICS_CYCLES=2 natkit-metrics
+	grep -qx 'natkit-metrics: publishing to CloudWatch, namespace natkit, Name=nat-a' /tmp/console
+	[ \"\$($calls | yq -p json -o json -I0 '.[0]')\" = '{\"Action\":\"PutMetricData\",\"Namespace\":\"natkit\",\"MetricData.member.1.MetricName\":\"conntrack_allowance_exceeded\",\"MetricData.member.1.Value\":\"0\",\"MetricData.member.1.Unit\":\"Count\",\"MetricData.member.1.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.1.Dimensions.member.1.Value\":\"nat-a\",\"MetricData.member.2.MetricName\":\"conntrack_allowance_available\",\"MetricData.member.2.Value\":\"1234\",\"MetricData.member.2.Unit\":\"Count\",\"MetricData.member.2.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.2.Dimensions.member.1.Value\":\"nat-a\"}' ]
+	[ \"\$($calls | yq -p json -o json -I0 'map(.[\"MetricData.member.1.Value\"])')\" = '[\"0\",\"5\"]' ]"
+
+echo "== metrics: a report that can't be sent says why on the console"
+ENA=1 run 'metrics: nat-a' "natkit-init
+	if NATKIT_CLOUDWATCH=http://127.0.0.1:9/ NATKIT_METRICS_CYCLES=1 natkit-metrics; then exit 1; fi
+	grep -q \"natkit-metrics: can't publish: PutMetricData: curl: \" /tmp/console"
+
 echo "== nat64: false is accepted (and off)"
 run 'nat64: false' "natkit-init | grep -q 'NAT64: off in user-data'"
 
@@ -158,6 +176,8 @@ fails 'cwagent_enabled: true
 cwagent_cfg_param_name: /natkit/test/notjson' "cwagent: /natkit/test/notjson is not a JSON object"
 fails 'console_password: /natkit/test/plain' "console_password: /natkit/test/plain is not a crypt hash"
 fails 'interface: eth7' "interface: no interface eth7"
+fails 'metrics: nat-a' "metrics: no conntrack_allowance counters on eth0"
+fails 'metrics: "a b"' "user-data: metrics: bad value"
 fails 'lifecycle_hook: "a b"' "user-data: lifecycle_hook: bad value"
 fails 'client_cidrs: 10.0.0.0/16' "user-data: client_cidrs: not a list of CIDRs"
 fails 'client_cidrs: []' "user-data: client_cidrs: not a list of CIDRs"

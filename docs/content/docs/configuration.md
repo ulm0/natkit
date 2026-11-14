@@ -20,6 +20,7 @@ nf_conntrack_buckets: 65536           # default: a quarter of nf_conntrack_max
 nf_conntrack_tcp_timeout_established: 86400
 tcp_keepalive_time: 600
 tcp_max_syn_backlog: 4096
+metrics: nat-a                        # EC2's conntrack allowance counters to CloudWatch, without the agent
 cwagent_enabled: true                 # CloudWatch agent with the JSON config in this SSM parameter
 cwagent_cfg_param_name: /natkit/cwagent
 console_password: /natkit/root-hash   # SSM parameter holding `openssl passwd -6` output: serial console login

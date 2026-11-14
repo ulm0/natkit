@@ -1,0 +1,80 @@
+#!/bin/sh
+# natkit-metrics (service): EC2's connection-tracking allowance counters to CloudWatch, only when natkit-init wrote
+# its config (user-data metrics). The ENA driver has them (ethtool -S): two numbers and one signed request
+# (curl --aws-sigv4) a cycle, so no agent, and it runs on 0.5 GiB. Namespace natkit, dimension Name=<metrics>:
+#   conntrack_allowance_exceeded   packets EC2 dropped because the allowance ran out, since the last report: on any
+#                                  interface (EC2 counts a drop on the ENI the packet was on). Alarm on Sum > 0.
+#   conntrack_allowance_available  tracked connections left before it runs out (the instance's, the same on every ENI)
+# The first cycle reports 0 dropped: its reading is where the counting starts. A report that fails is not lost: the
+# next one that gets through covers the time since the last one that did. That matters here, because a report is a
+# new connection too, and EC2 drops it like any other while the allowance is exhausted.
+set -u
+CONF=/run/natkit/metrics # natkit-init's: the name
+IMDS=${NATKIT_IMDS:-http://169.254.169.254/latest}
+# say <message>: to the serial console (memlogd's log isn't reachable from outside) and stderr
+say() { echo "natkit-metrics: $*" | tee -a "${NATKIT_CONSOLE:-/dev/console}" >&2; }
+
+[ -f "$CONF" ] || { echo "natkit-metrics: not enabled"; exit 0; }
+read -r name <"$CONF" && [ -n "$name" ] || { say "bad $CONF"; exit 1; }
+
+imds() { curl -fsS -m 5 -H "X-aws-ec2-metadata-token: $t" "$IMDS/$1"; }
+# publish: one PutMetricData; on a failure the reason in $why. The IMDS token and the role's credentials are fetched
+# every time: both expire, and this runs for as long as the instance does. $last: the counter at the last report
+# that got through.
+last=''
+publish() {
+	t=$(curl -fsS -m 2 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' "$IMDS/api/token" 2>&1) || { why="no instance metadata: $t"; return 1; }
+	region=$(imds meta-data/placement/region 2>&1) && profile=$(imds meta-data/iam/security-credentials/ 2>&1) &&
+		c=$(imds "meta-data/iam/security-credentials/$profile" 2>&1) || { why="no instance role"; return 1; }
+	# shellcheck disable=SC2046 # split on purpose: the two numbers
+	set -- $(for d in /sys/class/net/*; do ethtool -S "${d##*/}" 2>/dev/null; done | awk '
+		$1 == "conntrack_allowance_exceeded:" { e += $2; n++ }
+		$1 == "conntrack_allowance_available:" { if (a == "" || $2 + 0 < a + 0) a = $2 }
+		END { if (n && a != "") print e, a }')
+	[ $# = 2 ] || { why="no conntrack_allowance counters on any interface"; return 1; }
+	# less than at the last report: an interface went (its ENI was taken over), start counting again
+	if [ -z "$last" ] || [ "$1" -lt "$last" ]; then dropped=0; else dropped=$(($1 - last)); fi
+	# the credentials on stdin (-K -), not on the command line, where /proc would show them
+	r=$(printf 'user = "%s:%s"\nheader = "x-amz-security-token: %s"\n' "$(echo "$c" | yq -p json .AccessKeyId)" \
+		"$(echo "$c" | yq -p json .SecretAccessKey)" "$(echo "$c" | yq -p json .Token)" |
+		curl -K - -sS -m 10 -w '\n%{http_code}' --aws-sigv4 "aws:amz:$region:monitoring" \
+			--data-urlencode Action=PutMetricData --data-urlencode Version=2010-08-01 --data-urlencode Namespace=natkit \
+			--data-urlencode MetricData.member.1.MetricName=conntrack_allowance_exceeded \
+			--data-urlencode "MetricData.member.1.Value=$dropped" --data-urlencode MetricData.member.1.Unit=Count \
+			--data-urlencode MetricData.member.1.Dimensions.member.1.Name=Name \
+			--data-urlencode "MetricData.member.1.Dimensions.member.1.Value=$name" \
+			--data-urlencode MetricData.member.2.MetricName=conntrack_allowance_available \
+			--data-urlencode "MetricData.member.2.Value=$2" --data-urlencode MetricData.member.2.Unit=Count \
+			--data-urlencode MetricData.member.2.Dimensions.member.1.Name=Name \
+			--data-urlencode "MetricData.member.2.Dimensions.member.1.Value=$name" \
+			"${NATKIT_CLOUDWATCH:-https://monitoring.$region.amazonaws.com/}" 2>&1) || {
+		why="PutMetricData: $(printf '%s\n' "$r" | head -n 1)" # curl's own error comes first, the status line after it
+		return 1
+	}
+	case ${r##*
+} in
+	2??) last=$1 ;;
+	*)
+		why="PutMetricData: HTTP ${r##*
+} $(echo "$r" | yq -p xml '.ErrorResponse.Error | .Code + ": " + .Message' 2>/dev/null)"
+		return 1
+		;;
+	esac
+}
+
+# On the console when it starts to work and when it stops, not every cycle. 50 s: a cycle stays under a minute, so
+# no 1-minute period is left without a datapoint.
+ok='' n=0
+while :; do
+	if publish; then
+		[ "$ok" = 1 ] || say "publishing to CloudWatch, namespace natkit, Name=$name"
+		ok=1
+	else
+		[ "$ok" = 0 ] || say "can't publish: $why"
+		ok=0
+	fi
+	n=$((n + 1))
+	# test/init.sh: that many cycles, without the wait
+	[ -z "${NATKIT_METRICS_CYCLES:-}" ] || { [ "$n" -lt "$NATKIT_METRICS_CYCLES" ] && continue || exit "$((1 - ok))"; }
+	sleep 50
+done

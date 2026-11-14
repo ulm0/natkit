@@ -7,7 +7,7 @@
 #     the client may be without egress for at most NATKIT_HANDOVER_MAX seconds (default 30)
 #  3. a replacement whose setup fails (a setting natkit refuses): it never completes the group's lifecycle hook,
 #     so the group keeps the old instance and the client's egress never stops; a good setting then goes through
-#  4. conntrack alarm: the agent publishes the allowance counters under the group's name, and the alarm exists
+#  4. conntrack alarm: natkit publishes the allowance counters under the module's name, and the alarm exists
 #  5. client_cidrs without the client's subnet, untracked: nothing gets out, IPv4 or NAT64 (natkit's nftables alone)
 #  6. the default client_cidrs, untracked, tcp_established_timeout 350: egress again, both ENIs at 350 s
 # Then it destroys everything. The state is s3://$NATKIT_BUCKET/module-test/<tag>.tfstate, so a run that was killed
@@ -172,13 +172,13 @@ g=$(gap "$s2")
 
 echo "== 4. conntrack alarm"
 for _ in $(seq 20); do
-	d=$(aws cloudwatch get-metric-statistics --namespace natkit --metric-name ethtool_conntrack_allowance_available \
-		--dimensions "Name=AutoScalingGroupName,Value=$ASG" --start-time "$(ago 900)" --end-time "$(ago 0)" --period 60 \
+	d=$(aws cloudwatch get-metric-statistics --namespace natkit --metric-name conntrack_allowance_available \
+		--dimensions Name=Name,Value=natkit-module-test --start-time "$(ago 900)" --end-time "$(ago 0)" --period 60 \
 		--statistics Minimum --query 'Datapoints[-1].Minimum' --output text)
 	[ "$d" = None ] || break
 	sleep 15
 done
-[ "$d" != None ] || die "no conntrack_allowance_available datapoint for $ASG"
+[ "$d" != None ] || die "no conntrack_allowance_available datapoint for natkit-module-test"
 a=$(aws cloudwatch describe-alarms --alarm-names "$(out alarm)" --query 'MetricAlarms[0].StateValue' --output text)
 echo "allowance available: $d, alarm: $a"
 [ "$a" = OK ] || [ "$a" = INSUFFICIENT_DATA ] || die "the alarm is $a"
