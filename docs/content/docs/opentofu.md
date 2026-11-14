@@ -33,7 +33,7 @@ module "nat" {
 | `route_table_ids` | | private route tables that get `0.0.0.0/0` (and `64:ff9b::/96` with `nat64`) to the static ENI |
 | `ami_id` | | a natkit AMI of the instance type's architecture |
 | `name` | `natkit` | name and `natkit` tag of every resource |
-| `instance_type` | `t4g.micro` | see [instance size](../getting-started/#instance-size). A `*.nano` works without the CloudWatch agent: the module refuses it with `cwagent_cfg_param_name` or `conntrack_alarm_actions` |
+| `instance_type` | `t4g.micro` | see [instance size](../getting-started/#instance-size). A `*.nano` works without the CloudWatch agent: the module refuses it with `cwagent_cfg_param_name` |
 | `eip` | `true` | allocate an EIP and have the instance take it. Otherwise it egresses from its own public IP, which changes on replacement |
 | `nat64` | `false` | route `64:ff9b::/96` to the ENI and give it an IPv6 address (the subnet needs an IPv6 CIDR) |
 | `ipv6_cidr` | `null` | the VPC's IPv6 CIDR, a default client with `nat64` |
@@ -42,7 +42,7 @@ module "nat" {
 | `tcp_established_timeout` | EC2's | EC2's idle timeout in seconds (60 to 432 000) for the established TCP connections it tracks, on both ENIs. Going back to `null` leaves the static ENI at its last value. See [Performance](../performance/) |
 | `settings` | `{}` | natkit's tuning [user-data keys](../configuration/): `ip_local_port_range`, `nf_conntrack_max`, `nf_conntrack_buckets`, `nf_conntrack_tcp_timeout_established`, `tcp_keepalive_time`, `tcp_max_syn_backlog`. Any other key is refused at plan time |
 | `cwagent_cfg_param_name` | `null` | SSM parameter with a CloudWatch agent JSON config: enables the agent |
-| `conntrack_alarm_actions` | `null` | alarm when EC2 drops packets because the [connection-tracking allowance](../performance/) ran out, with these actions (SNS topic ARNs; `[]` for none). Runs the CloudWatch agent with the module's own config, so not together with `cwagent_cfg_param_name` |
+| `conntrack_alarm_actions` | `null` | alarm when EC2 drops packets because the [connection-tracking allowance](../performance/) ran out, and when the NAT stops reporting, with these actions (SNS topic ARNs; `[]` for none). natkit publishes the counters itself ([`metrics`](../cloudwatch/#allowance-metrics)), under the module's `name`. CloudWatch bills it |
 | `instance_profile` | `null` | an existing instance profile to use instead of the module's role, where IAM is managed elsewhere. Its role needs the [instance role](../instance-role/)'s permissions |
 | `console_password_param` | `null` | SSM parameter with root's crypt hash for the EC2 Serial Console |
 | `tags` | `{}` | extra tags |
@@ -71,4 +71,5 @@ Upgrading to v0.1.4:
 - The instance is replaced once: its user-data changes.
 - The lifecycle hook is created along with that first replacement, so it may not hold it yet. It holds every one after.
 - With `instance_profile`, add the Auto Scaling actions of the [instance role](../instance-role/) to your role before you apply, and the takeover actions (`ec2:DescribeNetworkInterfaces`, `ec2:DetachNetworkInterface`) if it doesn't have them. Without them the new instance fails its setup, and if the hook doesn't hold this first replacement yet, the group still terminates the old instance after the warmup: nothing routes.
+- With `conntrack_alarm_actions`, natkit now publishes the counters itself. The metrics are `conntrack_allowance_exceeded` (packets dropped since the last report) and `conntrack_allowance_available`, with the dimension `Name`. They were `ethtool_conntrack_allowance_*`, with `AutoScalingGroupName`: change your own alarms and dashboards that use them. The module removes the agent's SSM parameter and `CloudWatchAgentServerPolicy` from its role, and its alarm reports once that it has no data, until the new instance publishes.
 - From v0.1.1 or earlier, the upgrade also splits the one security group into two.

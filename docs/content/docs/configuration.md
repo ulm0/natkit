@@ -15,11 +15,12 @@ interface: eth0                       # public interface, if not the primary ENI
 client_cidrs: [10.0.0.0/16]           # only these sources may open connections through the NAT (default: any)
 nat64: false                          # no NAT64 (default: on)
 ip_local_port_range: "1024 65535"     # tuning, applied only when set
-nf_conntrack_max: 262144              # default: one flow per 8 kB of RAM (about 117 000 on 1 GiB)
+nf_conntrack_max: 262144              # default: one flow per 8 kB of RAM, and at least EC2's allowance
 nf_conntrack_buckets: 65536           # default: a quarter of nf_conntrack_max
 nf_conntrack_tcp_timeout_established: 86400
 tcp_keepalive_time: 600
 tcp_max_syn_backlog: 4096
+metrics: nat-a                        # EC2's conntrack allowance counters to CloudWatch, without the agent
 cwagent_enabled: true                 # CloudWatch agent with the JSON config in this SSM parameter
 cwagent_cfg_param_name: /natkit/cwagent
 console_password: /natkit/root-hash   # SSM parameter holding `openssl passwd -6` output: serial console login

@@ -52,8 +52,8 @@ locals {
   region  = data.aws_region.current.region
   ec2_arn = "${local.arn}:ec2:${local.region}:${local.account}"
   ssm_arn = "${local.arn}:ssm:${local.region}:${local.account}"
-  # the boot test's agent config, and the one tofu/nat writes for the module test (its name is "natkit-module-test")
-  test_params = ["/natkit/boot-test/*", "/natkit/natkit-module-test/*"]
+  # the boot test's agent config
+  test_params = ["/natkit/boot-test/*"]
 }
 
 # ---- test network: a public subnet and a private one with its own route table, IPv4 + IPv6, one AZ

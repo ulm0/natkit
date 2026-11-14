@@ -27,6 +27,7 @@ make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vm
 On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](../opentofu/) and checks:
 
 - an instance refresh leaves the client without egress for at most 30 seconds;
+- a replacement whose setup fails doesn't stop egress;
 - the conntrack alarm's metric is published;
 - a client outside `client_cidrs` gets nothing through, with `untracked`;
 - `tcp_established_timeout` reaches both ENIs.

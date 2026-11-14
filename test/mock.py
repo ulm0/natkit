@@ -1,5 +1,5 @@
-# Mock EC2 IMDSv2 + EC2 Query API + SSM GetParameter + Auto Scaling's lifecycle hook calls for test/init.sh.
-# User-data comes from /user-data, if mounted.
+# Mock EC2 IMDSv2 + EC2 Query API + SSM GetParameter + Auto Scaling's lifecycle hook calls + CloudWatch
+# PutMetricData for test/init.sh. User-data comes from /user-data, if mounted.
 # The primary ENI's MAC is the test container's (docker run --mac-address); the static ENI appears in the metadata
 # after AttachNetworkInterface. The ENI starts out on an old instance: DescribeNetworkInterfaces shows that attachment
 # (or is denied, with NO_DESCRIBE set), DetachNetworkInterface starts the detach, and the first attach still fails.
@@ -8,8 +8,9 @@
 # (Pending:Wait); ASG_STATE=InService for an instance already in service, ASG_STATE=none for one in no group;
 # NO_COMPLETE denies CompleteLifecycleAction. NO_REGION: the metadata has no region. THROTTLE: the first
 # DescribeNetworkInterfaces and the first DetachNetworkInterface are throttled. CREDS_LATE: the instance role's
-# credentials are missing the first time they're asked for, as right after launch.
-# GET /_calls lists the EC2 and Auto Scaling actions and their parameters.
+# credentials are missing the first time they're asked for, as right after launch. CW_FAIL=<n>: the nth
+# PutMetricData fails (500), recorded all the same.
+# GET /_calls lists the EC2, Auto Scaling and CloudWatch actions and their parameters.
 import json, os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qsl
@@ -118,6 +119,12 @@ class H(BaseHTTPRequestHandler):
         action = p.pop("Action", "")
         if "/us-east-1/autoscaling/" in auth:
             return self.reply(*asg(action, p))
+        if "/us-east-1/monitoring/" in auth:
+            ok = action == "PutMetricData" and p.pop("Version", "") == "2010-08-01"
+            calls.append({"Action": action, **p})
+            if ok and os.environ.get("CW_FAIL") == str(sum(c["Action"] == "PutMetricData" for c in calls)):
+                return self.reply(500, asg_err("InternalFailure", "try again"))
+            return self.reply(200 if ok else 400, ok_xml(action) if ok else asg_err("InvalidParameterValue", "unexpected"))
         if "/us-east-1/ec2/" not in auth:
             return self.reply(403, err_xml("AuthFailure", "wrong service"))
         if p.pop("Version", "") != "2016-11-15":

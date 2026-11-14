@@ -35,7 +35,7 @@ During the stalls the instance was not busy: at least 83% of its CPU was idle an
 **EC2's connection tracking.** EC2 tracks the connections that a security group admits, up to a number per instance that depends on the instance type. Past it, EC2 drops packets before they reach the instance. natkit prints the number at boot, before any traffic:
 
 ```
-natkit-init: EC2 conntrack allowance 153911, nf_conntrack_max 119040
+natkit-init: EC2 conntrack allowance 153911, nf_conntrack_max 153911
 ```
 
 | Instance type | Tracked connections allowed | Flows through the NAT, tracked | Untracked |
@@ -47,7 +47,7 @@ natkit-init: EC2 conntrack allowance 153911, nf_conntrack_max 119040
 
 A flow through a NAT instance counts twice, once on each network interface, unless the static ENI is untracked. A closed connection frees its entries after a minute or two, so the limit applies to flows opened within that window. AWS doesn't publish the allowance: read it from the console line or the counters below.
 
-**The kernel's connection tracking.** Linux sizes its own table for a host: about 7 000 flows under 1 GiB of memory. natkit raises the default to one flow per 8 kB of memory: about 118 000 on 1 GiB, about 55 000 on 0.5 GiB. Set [`nf_conntrack_max`](../configuration/) to change it. A full table logs `nf_conntrack: table full, dropping packet` on the serial console.
+**The kernel's connection tracking.** Linux sizes its own table for a host: about 7 000 flows under 1 GiB of memory. natkit raises the default to one flow per 8 kB of memory, and at least EC2's allowance: below it, the kernel's table fills first, and the [allowance metrics](../cloudwatch/#allowance-metrics) don't see that. On a `t4g.nano` that's about 154 000 instead of 55 000, about 60 MB of its memory when full. Set [`nf_conntrack_max`](../configuration/) to change it. A full table logs `nf_conntrack: table full, dropping packet` on the serial console.
 
 ## Get more out of the allowance
 
@@ -65,13 +65,13 @@ A flow through a NAT instance counts twice, once on each network interface, unle
 
 ## Watch the limit
 
-With the [OpenTofu module](../opentofu/), `conntrack_alarm_actions` sets this up: the agent publishes the counters and a CloudWatch alarm goes off when EC2 drops packets.
+With the [OpenTofu module](../opentofu/), `conntrack_alarm_actions` sets this up: natkit publishes the counters and a CloudWatch alarm goes off when EC2 drops packets, or when the NAT stops reporting. No agent is involved, so it works on a 0.5 GiB instance.
 
 ```hcl
 conntrack_alarm_actions = [aws_sns_topic.alerts.arn]
 ```
 
-Without the module, the [CloudWatch agent](../cloudwatch/) can publish the ENA driver's counters. Add this to its config:
+Without the module, set [`metrics`](../cloudwatch/#allowance-metrics) in the user-data and alarm on the sum of `conntrack_allowance_exceeded`. For the other allowances (packets per second, bandwidth), the [CloudWatch agent](../cloudwatch/#the-cloudwatch-agent) can publish the ENA driver's counters. Add this to its config:
 
 ```json
 {
@@ -81,8 +81,6 @@ Without the module, the [CloudWatch agent](../cloudwatch/) can publish the ENA d
       "ethtool": {
         "interface_include": ["eth0", "eth1"],
         "metrics_include": [
-          "conntrack_allowance_available",
-          "conntrack_allowance_exceeded",
           "pps_allowance_exceeded",
           "bw_in_allowance_exceeded",
           "bw_out_allowance_exceeded"
@@ -93,5 +91,5 @@ Without the module, the [CloudWatch agent](../cloudwatch/) can publish the ENA d
 }
 ```
 
-- `conntrack_allowance_available` is how many more connections EC2 will track. Alarm when it gets low.
-- `conntrack_allowance_exceeded` counts the packets EC2 dropped because the allowance ran out. It should stay flat.
+- natkit's `conntrack_allowance_exceeded` is the packets EC2 dropped since the last report because the allowance ran out. It should stay at 0. `conntrack_allowance_available` is how many more connections EC2 will track: alarm when it gets low.
+- The agent's `ethtool_pps_allowance_exceeded`, `ethtool_bw_in_allowance_exceeded` and `ethtool_bw_out_allowance_exceeded` are the driver's running counts of dropped packets. They should stay flat.
