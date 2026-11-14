@@ -78,11 +78,11 @@ ports 61001-65535 of the instance's address: keep `ip_local_port_range` below th
 
 ```hcl
 module "nat" {
-  source          = "github.com/ulm0/natkit//tofu/nat"
+  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.2"
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-<version>-arm64
+  ami_id          = "ami-..." # natkit-v0.1.2-arm64: the same release as the module
   settings        = { nf_conntrack_max = "262144" }
 }
 ```

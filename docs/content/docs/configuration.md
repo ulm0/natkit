@@ -25,7 +25,7 @@ cwagent_cfg_param_name: /natkit/cwagent
 console_password: /natkit/root-hash   # SSM parameter holding `openssl passwd -6` output: serial console login
 ```
 
-`client_cidrs` is a list of IPv4 and IPv6 CIDRs. With it, natkit forwards a new connection only from those sources, NAT64 included; replies to a forwarded connection always pass. Without it, the security group alone decides who can use the NAT. The [OpenTofu module](../opentofu/) always sets it.
+`client_cidrs` is a list of IPv4 and IPv6 CIDRs. With it, natkit forwards a new connection only from those sources; replies to a forwarded connection always pass. NAT64 serves only its IPv6 CIDRs, so a list with none turns NAT64 away for everyone, and Jool lets in only the IPv4 hosts a client has contacted (address-dependent filtering). Without it, the security group alone decides who can use the NAT. The [OpenTofu module](../opentofu/) always sets it.
 
 An unknown key or a malformed value stops the setup. The console then prints `natkit: FAIL <reason>`.
 

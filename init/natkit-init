@@ -75,20 +75,25 @@ check cwagent_enabled 'true|false'
 yq -e '.nat64 == null or .nat64 == true or .nat64 == false' "$UD" >/dev/null 2>&1 || die "user-data: nat64: bad value '$(yq .nat64 "$UD")'"
 check cwagent_cfg_param_name '[A-Za-z0-9_./-]+'
 check console_password '[A-Za-z0-9_./-]+'
-# client_cidrs: a non-empty list of CIDRs, split by family for nftables (which checks the addresses themselves)
+# client_cidrs: a non-empty list of CIDRs, split by family for nftables (which checks the IPv6 addresses itself).
+# IPv4 octets without leading zeros: nft would read 010.0.0.0/8 as octal, 8.0.0.0/8.
 yq -e '.client_cidrs == null or ((.client_cidrs | tag) == "!!seq" and (.client_cidrs | length) > 0)' "$UD" >/dev/null 2>&1 ||
 	die "user-data: client_cidrs: not a list of CIDRs"
 clients=$(yq '.client_cidrs != null' "$UD")
-c4='' c6=''
+c4='' c6='' o='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+set -f # split the list on whitespace, but never expand a * in it
 for c in $(yq '.client_cidrs // [] | .[] | tostring' "$UD"); do
-	if echo "$c" | grep -qxE '([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}'; then
+	if echo "$c" | grep -qxE "($o\\.){3}$o/(3[0-2]|[12]?[0-9])"; then
 		c4="$c4${c4:+, }$c"
-	elif echo "$c" | grep -qxE '[0-9A-Fa-f:]*:[0-9A-Fa-f:]*/[0-9]{1,3}'; then
+	elif echo "$c" | grep -qxE '[0-9A-Fa-f:]*:[0-9A-Fa-f:]*/(12[0-8]|1[01][0-9]|[1-9]?[0-9])'; then
 		c6="$c6${c6:+, }$c"
 	else
 		die "user-data: client_cidrs: bad value '$c'"
 	fi
 done
+set +f
+# blank entries split to no words at all: a list of them would silently forward nothing
+[ "$clients" != true ] || [ -n "$c4$c6" ] || die "user-data: client_cidrs: not a list of CIDRs"
 
 region=$(imds meta-data/placement/region)
 iid=$(imds meta-data/instance-id)
@@ -314,7 +319,9 @@ if [ -n "$a" ]; then
 	echo "natkit-init: $l" >"$CONSOLE" 2>/dev/null || :
 fi
 
-# NAT64: Jool's modules (the jool image in natkit.yml's init) and its userspace tool (this image), same version
+# NAT64: Jool's modules (the jool image in natkit.yml's init) and its userspace tool (this image), same version.
+# With client_cidrs, address-dependent filtering: by default Jool lets any IPv4 host reach a client's mapping
+# (pool4 address and port); with it, only the hosts the client contacted, as the IPv4 masquerade does.
 nat64=off
 m=/lib/modules/$(uname -r)/extra
 if [ "$(yq '.nat64 == false' "$UD")" = true ]; then
@@ -322,7 +329,8 @@ if [ "$(yq '.nat64 == false' "$UD")" = true ]; then
 elif [ -f "$m/jool.ko" ]; then
 	if { grep -q '^jool_common ' /proc/modules || insmod "$m/jool_common.ko"; } &&
 		{ grep -q '^jool ' /proc/modules || insmod "$m/jool.ko"; } &&
-		jool instance flush && jool instance add --netfilter --pool6 "$JOOL_POOL6"; then
+		jool instance flush && jool instance add --netfilter --pool6 "$JOOL_POOL6" &&
+		{ [ "$clients" != true ] || jool global update address-dependent-filtering true; }; then
 		nat64=on
 		log "NAT64 on, pool6 $JOOL_POOL6"
 	else

@@ -63,8 +63,8 @@ variable "client_cidrs" {
   type        = list(string)
   default     = null
   validation {
-    condition     = var.client_cidrs == null || (length(coalesce(var.client_cidrs, [])) > 0 && alltrue([for c in coalesce(var.client_cidrs, []) : can(cidrhost(c, 0))]))
-    error_message = "client_cidrs: a non-empty list of CIDRs (10.0.0.0/16, 2600:1f18::/56)."
+    condition     = var.client_cidrs == null || (length(coalesce(var.client_cidrs, [])) > 0 && alltrue([for c in coalesce(var.client_cidrs, []) : try(cidrsubnet(c, 0, 0) == lower(c), false)]))
+    error_message = "client_cidrs: a non-empty list of CIDRs in canonical form: no host bits, no leading zeros (10.0.0.0/16, 2600:1f18::/56)."
   }
 }
 variable "untracked" {
@@ -73,7 +73,7 @@ variable "untracked" {
   default     = false
 }
 variable "tcp_established_timeout" {
-  description = "EC2's idle timeout, in seconds (60-432000), for established TCP connections it tracks on both ENIs. Default: EC2's (432000, or 350 on Nitro v6 instances). 350 matches NAT Gateway and frees the allowance from abandoned connections sooner."
+  description = "EC2's idle timeout, in seconds (60-432000), for established TCP connections it tracks on both ENIs. Default: EC2's (432000, or 350 on Nitro v6 instances). 350 matches NAT Gateway and frees the allowance from abandoned connections sooner. Going back to null leaves the static ENI at its last value: set EC2's default explicitly instead."
   type        = number
   default     = null
   validation {
@@ -103,6 +103,13 @@ variable "tags" {
 
 data "aws_vpc" "this" {
   id = var.vpc_id
+}
+# its name, for the launch template's precondition
+data "aws_ami" "this" {
+  filter {
+    name   = "image-id"
+    values = [var.ami_id]
+  }
 }
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
@@ -306,6 +313,14 @@ resource "aws_launch_template" "this" {
     content {
       resource_type = tag_specifications.value
       tags          = local.tags
+    }
+  }
+  # natkit v0.1.1 and earlier stop at boot on client_cidrs, an unknown key to them, and the instance refresh would
+  # replace a working NAT with one that never takes the ENI
+  lifecycle {
+    precondition {
+      condition     = !can(regex("^natkit-v0\\.1\\.[01]-", data.aws_ami.this.name))
+      error_message = "${data.aws_ami.this.name} doesn't know client_cidrs, which this module sets: use natkit v0.1.2 or later, the module's own release."
     }
   }
 }

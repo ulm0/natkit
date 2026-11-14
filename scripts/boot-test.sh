@@ -3,8 +3,8 @@
 #  1. an EIP and a static ENI (source/dest check off) are made; the private subnet's route table gets
 #     0.0.0.0/0 -> the ENI; an SSM parameter holds a CloudWatch agent config
 #  2. NAT instance A boots with user-data eip_id + eni_id + client_cidrs (the private subnet) + tuning + cwagent +
-#     nat64: false: its console line must
-#     say ready, private eth1, the EIP, nat64 off, cwagent on. (Without Jool: v0.1.0 only forwarded IPv4 with it on.)
+#     nat64: false: its console line must say ready, private eth1, the EIP, nat64 off, cwagent on. (Without Jool:
+#     v0.1.0 only forwarded IPv4 with it on.)
 #  3. a client (Amazon Linux 2023, private subnet, no public IP) prints its egress IP on its console every 15 s:
 #     it must be the EIP
 #  4. failover: instance B boots with the same user-data but NAT64 (the default) while A holds the ENI; A is terminated; B must attach the
