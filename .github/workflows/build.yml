@@ -5,7 +5,7 @@
 #           init:<sha>, :latest (main), :<tag> (multi-arch)
 #   ami     on v* tags or a manual run: a UEFI AMI per arch named natkit-<tag|sha>-<arch>, tagged natkit.io/release
 #           (scripts/ami.sh), then the end-to-end boot test (scripts/boot-test.sh), one arch at a time (they share
-#           the test subnet's route table)
+#           the test subnet's route table), and on arm64 the OpenTofu module's test (scripts/module-test.sh)
 #   release on v* tags, once both AMIs pass: the GitHub release
 # Repo secret: AWS_ROLE_ARN (GitHub OIDC role; a secret so the account ID stays out of the public logs).
 # Repo variables: AWS_REGION, NATKIT_BUCKET, NATKIT_TEST_PUBLIC_SUBNET,
@@ -203,6 +203,19 @@ jobs:
           NATKIT_TEST_PRIVATE_SUBNET: ${{ vars.NATKIT_TEST_PRIVATE_SUBNET }}
           NATKIT_TEST_INSTANCE_PROFILE: ${{ vars.NATKIT_TEST_INSTANCE_PROFILE }}
           NATKIT_BOOT_TEST_TAG: run-${{ github.run_id }}-${{ matrix.arch }}
+      # one architecture: the module and natkit-init's side of it are the same on both
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        if: matrix.arch == 'arm64' && (github.event_name != 'workflow_dispatch' || inputs.boot_test)
+        with:
+          tofu_wrapper: false
+      - name: module test (handover, conntrack alarm, client_cidrs, untracked)
+        if: matrix.arch == 'arm64' && (github.event_name != 'workflow_dispatch' || inputs.boot_test)
+        run: scripts/module-test.sh ${{ steps.ami.outputs.ami }} ${{ matrix.arch }}
+        env:
+          NATKIT_TEST_PUBLIC_SUBNET: ${{ vars.NATKIT_TEST_PUBLIC_SUBNET }}
+          NATKIT_TEST_PRIVATE_SUBNET: ${{ vars.NATKIT_TEST_PRIVATE_SUBNET }}
+          NATKIT_TEST_INSTANCE_PROFILE: ${{ vars.NATKIT_TEST_INSTANCE_PROFILE }}
+          NATKIT_MODULE_TEST_TAG: run-${{ github.run_id }}
 
   # the boot test's trap doesn't run if the job is cancelled or the runner dies: remove its resources by tag regardless
   boot-cleanup:
@@ -239,6 +252,29 @@ jobs:
           for arch in arm64 amd64; do
             aws ssm delete-parameter --name "/natkit/boot-test/run-${{ github.run_id }}-$arch/cwagent" 2>/dev/null || true
           done
+      # the module test's state is still there only if its own destroy didn't run or didn't finish
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_wrapper: false
+      - name: destroy what the module test left
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          NATKIT_BUCKET: ${{ vars.NATKIT_BUCKET }}
+          TF_VAR_arch: arm64
+          TF_VAR_tag: run-${{ github.run_id }}
+          TF_VAR_public_subnet: ${{ vars.NATKIT_TEST_PUBLIC_SUBNET }}
+          TF_VAR_private_subnet: ${{ vars.NATKIT_TEST_PRIVATE_SUBNET }}
+          TF_VAR_instance_profile: ${{ vars.NATKIT_TEST_INSTANCE_PROFILE }}
+        run: |
+          key=module-test/run-${{ github.run_id }}.tfstate
+          aws s3api head-object --bucket "$NATKIT_BUCKET" --key "$key" >/dev/null 2>&1 || exit 0
+          name=natkit-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}-arm64
+          TF_VAR_ami_id=$(aws ec2 describe-images --owners self --filters "Name=name,Values=$name" --query 'Images[0].ImageId' --output text)
+          export TF_VAR_ami_id
+          tofu -chdir=test/module init -input=false -backend-config="bucket=$NATKIT_BUCKET" -backend-config="key=$key" -backend-config="region=$AWS_REGION"
+          tofu -chdir=test/module destroy -input=false -auto-approve
+          aws s3 rm "s3://$NATKIT_BUCKET/$key"
       # only release (natkit-v*) AMIs are kept; a manual run without the boot test keeps its own AMIs for testing by hand
       - name: prune per-commit AMIs
         env:
