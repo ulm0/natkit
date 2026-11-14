@@ -19,7 +19,7 @@ enableGitInfo = true
     endLevel = 3
 
 [params]
-  description = "A NAT instance AMI for AWS on LinuxKit: fck-nat's features, immutable and in memory."
+  description = "A NAT instance AMI for AWS on LinuxKit: fck-nat's features on an immutable image."
   [params.footer]
     copyright = "© :YEAR: natkit. MIT licensed."
   [params.docs]

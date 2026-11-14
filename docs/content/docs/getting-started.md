@@ -40,12 +40,12 @@ Without user-data, natkit is a plain NAT out of the primary ENI. For the HA layo
 
 | Architecture | Minimum |
 |---|---|
-| arm64 | `t4g.micro` |
-| amd64 | `t3.micro` |
+| arm64 | `t4g.nano` |
+| amd64 | `t3.nano`, `t3a.nano` |
 
-natkit needs at least 1 GiB of memory, with or without the CloudWatch agent.
+0.5 GiB of memory is enough: the root filesystem is a read-only partition on the EBS volume, not in memory. The [CloudWatch agent](../cloudwatch/) needs 1 GiB (`t4g.micro`, `t3.micro`).
 
-{{< alert context="warning" text="The 0.5 GiB sizes (`t4g.nano`, `t3.nano`, `t3a.nano`) are not supported. Their UEFI often can't find room for natkit's in-memory image next to the kernel. The boot then hangs at `EFI stub: ERROR: Failed to load initrd`, and EC2 still reports the instance as running, so an Auto Scaling group doesn't replace it." />}}
+A smaller instance also has smaller limits. See [Performance](../performance/).
 
 ## Check that it's up
 

@@ -2,7 +2,7 @@
 
 A NAT instance AMI for AWS, arm64 and x86_64: [fck-nat](https://github.com/AndrewGuenther/fck-nat)'s features on
 [LinuxKit](https://github.com/linuxkit/linuxkit) instead of Amazon Linux, systemd and Packer. The OS is an immutable
-in-memory image: a minimal kernel ([lk-kernel](https://github.com/ulm0/lk-kernel), shared with yagan and limakit), containerd, and a handful of service containers. There's no package
+image with a read-only root: a minimal kernel ([lk-kernel](https://github.com/ulm0/lk-kernel), shared with yagan and limakit), containerd, and a handful of service containers. There's no package
 manager, SSH or SSM agent.
 
 Docs: [natkit.ulm0.com](https://natkit.ulm0.com).
@@ -110,10 +110,8 @@ where you can.
 The CloudWatch agent image (~150 MB unpacked) is pulled from `public.ecr.aws` through the NAT's own egress and kept
 in memory.
 
-Instance size: at least 1 GiB of memory (`t4g.micro` on arm64, `t3.micro` on amd64). The 0.5 GiB sizes (`t4g.nano`,
-`t3.nano`, `t3a.nano`) are not supported: their UEFI often can't fit natkit's in-memory image next to the randomly
-placed (KASLR) kernel, and the instance hangs at `EFI stub: ERROR: Failed to load initrd` while EC2 still reports it
-as running.
+Instance size: 0.5 GiB of memory is enough (`t4g.nano` on arm64, `t3.nano` or `t3a.nano` on amd64). The CloudWatch
+agent needs 1 GiB (`t4g.micro`, `t3.micro`): its image doesn't fit in a nano's memory.
 
 ## Hardening
 

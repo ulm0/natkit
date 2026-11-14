@@ -3,7 +3,7 @@ hero:
   weight: 10
   template: hero
   title: natkit
-  subtitle: A **NAT instance AMI** for AWS, arm64 and x86_64. [fck-nat](https://github.com/AndrewGuenther/fck-nat)'s features on **LinuxKit**, as an immutable in-memory image.
+  subtitle: A **NAT instance AMI** for AWS, arm64 and x86_64. [fck-nat](https://github.com/AndrewGuenther/fck-nat)'s features on **LinuxKit**, as an immutable image with a read-only root.
   ctaButton:
     icon: rocket_launch
     btnText: Get started
@@ -22,7 +22,7 @@ featureGrid:
   items:
     - title: Immutable
       icon: lock
-      description: A minimal kernel, containerd and a handful of service containers, all in memory. No package manager, SSH or SSM agent.
+      description: A minimal kernel, containerd and a handful of service containers on a read-only root. No package manager, SSH or SSM agent.
     - title: Highly available
       icon: sync_alt
       description: An Auto Scaling group of one with a static ENI and an EIP. A replacement takes the ENI first, then the EIP.

@@ -40,13 +40,14 @@ natkit-init: EC2 conntrack allowance 153911, nf_conntrack_max 119040
 
 | Instance type | Tracked connections allowed | Flows through the NAT, tracked | Untracked |
 |---|---|---|---|
+| `t3.nano`, `t3a.nano` | 25 000 | 12 500 | 25 000 |
 | `t3.micro` | about 51 000 | about 25 000 | about 51 000 |
-| `t4g.micro` | about 154 000 | about 77 000 | about 154 000 |
+| `t4g.nano`, `t4g.micro` | about 154 000 | about 77 000 | about 154 000 |
 | `c7gn.medium` | about 103 000 | about 51 000 | about 103 000 |
 
 A flow through a NAT instance counts twice, once on each network interface, unless the static ENI is untracked. A closed connection frees its entries after a minute or two, so the limit applies to flows opened within that window. AWS doesn't publish the allowance: read it from the console line or the counters below.
 
-**The kernel's connection tracking.** Linux sizes its own table for a host: about 7 000 flows under 1 GiB of memory. natkit raises the default to one flow per 8 kB of memory, about 118 000 on 1 GiB. Set [`nf_conntrack_max`](../configuration/) to change it. A full table logs `nf_conntrack: table full, dropping packet` on the serial console.
+**The kernel's connection tracking.** Linux sizes its own table for a host: about 7 000 flows under 1 GiB of memory. natkit raises the default to one flow per 8 kB of memory: about 118 000 on 1 GiB, about 55 000 on 0.5 GiB. Set [`nf_conntrack_max`](../configuration/) to change it. A full table logs `nf_conntrack: table full, dropping packet` on the serial console.
 
 ## Get more out of the allowance
 

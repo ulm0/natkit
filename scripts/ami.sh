@@ -1,5 +1,5 @@
 #!/bin/sh
-# Registers a natkit raw-efi image as a UEFI AMI: S3 upload -> import-snapshot -> register-image.
+# Registers a natkit disk image (make) as a UEFI AMI: S3 upload -> import-snapshot -> register-image.
 # (`linuxkit push aws` can't: it registers x86_64 BIOS images only.)
 #
 #   scripts/ami.sh <image> <arm64|amd64> <name> [tag=value ...]
