@@ -132,7 +132,7 @@ With `conntrack_alarm_actions`, natkit publishes the [allowance counters](/docs/
 
 Every classic metric the [agent](/docs/operate/monitoring/#the-cloudwatch-agent) publishes is a custom metric: $0.30 a month each, plus its `PutMetricData` requests, about $0.44 a month at one request a minute. Each combination of metric name and dimensions is one metric.
 
-- The `ethtool` example in [Performance](/docs/operate/monitoring/#alarms) has 5 counters on 2 interfaces: 10 metrics, $3.00 a month.
+- The `ethtool` example in [Monitoring](/docs/operate/monitoring/#the-cloudwatch-agent) has 3 counters on 2 interfaces: 6 metrics, $1.80 a month.
 - With an `InstanceId` dimension, every replacement instance starts new metrics. They are billed by the hour, so the old ones stop costing when the old instance stops.
 - Logs, if the agent's config collects them, are billed per GB ingested and per GB stored.
 - The agent needs 1 GiB of memory, a micro instead of a nano: $3.07 a month more on T4g, $3.80 on T3.

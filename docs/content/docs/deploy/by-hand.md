@@ -10,7 +10,7 @@ Without the [OpenTofu module](/docs/deploy/opentofu/), launch the AMI yourself:
 2. Turn off source/dest check on its ENI, or let natkit do it with [`eni_id`](/docs/reference/configuration/).
 3. Point the private subnets' default route at it, as you would for fck-nat.
 
-The AMI requires IMDSv2.
+The AMI requires IMDSv2. Then [check that it's up](/docs/start/getting-started/#check-that-its-up).
 
 Without user-data, natkit is a plain NAT out of the primary ENI. The [user-data keys](/docs/reference/configuration/) add the rest, and the ones that call AWS need an [instance role](/docs/reference/instance-role/).
 

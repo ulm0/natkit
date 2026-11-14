@@ -31,6 +31,10 @@ AWS_REGION=us-east-1 NATKIT_BUCKET=my-import-bucket scripts/ami.sh "natkit-$V-$A
 
 A smaller instance can also have smaller limits: a `t3.nano` tracks 25 000 connections, a `t4g.nano` as many as a `t4g.micro`. See [Performance](/docs/operate/performance/), and [Costs](/docs/operate/costs/) for what each size and everything around it is billed.
 
+## Deploy
+
+With the [OpenTofu module](/docs/deploy/opentofu/), next to the [VPC module](/docs/deploy/vpc-module/) or not, or [by hand](/docs/deploy/by-hand/). Then check that it's up.
+
 ## Check that it's up
 
 natkit prints its result as one line on the serial console:

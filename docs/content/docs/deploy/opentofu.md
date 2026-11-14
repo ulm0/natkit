@@ -24,7 +24,7 @@ module "nat" {
 }
 ```
 
-With the community VPC module, see [With the VPC module](/docs/deploy/vpc-module/). [Upgrading](/docs/deploy/upgrading/) says how a new release rolls out and what each one changes.
+With the community VPC module, see [With the VPC module](/docs/deploy/vpc-module/). Once applied, [check that it's up](/docs/start/getting-started/#check-that-its-up). [Upgrading](/docs/deploy/upgrading/) says how a new release rolls out and what each one changes.
 
 <!-- terraform-docs tofu/nat writes Inputs and Outputs from the module's descriptions -->
 <!-- BEGIN_TF_DOCS -->
