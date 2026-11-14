@@ -12,12 +12,15 @@ For HA, run natkit in an Auto Scaling group of one, with `eni_id` and `eip_id` i
 
 When an instance is replaced:
 
-1. The new instance keeps retrying the ENI attachment while the old one still holds it, for up to 15 minutes.
-2. Once it has the ENI, it takes the EIP.
+1. The new instance finishes its own setup first: nftables, sysctls, NAT64, its SSM parameters. If any of it fails, it takes neither the ENI nor the EIP.
+2. It takes the ENI. If another instance holds it, natkit detaches it from that one (a forced detach) and attaches it.
+3. Once it has the ENI, it takes the EIP.
 
-fck-nat takes the EIP first. That moves egress off the EIP while the old instance is still routing. natkit waits for the ENI first to avoid that gap.
+The takeover needs `ec2:DescribeNetworkInterfaces` and `ec2:DetachNetworkInterface` in the [instance role](../instance-role/). Without them the new instance retries the attachment until the old one lets go, for up to 15 minutes, as fck-nat does.
 
-The [OpenTofu module](../opentofu/) sets up this layout.
+fck-nat takes the EIP first. That moves egress off the EIP while the old instance is still routing. natkit takes the ENI first to avoid that gap.
+
+The [OpenTofu module](../opentofu/) sets up this layout. Its Auto Scaling group launches the replacement before it terminates the old instance, so egress stops only for the handover: 14 seconds in a test. Connections open at that moment are cut, because the new instance doesn't know them.
 
 ## One NAT per Availability Zone
 
@@ -32,7 +35,7 @@ locals {
 }
 
 module "nat" {
-  source   = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.2"
+  source   = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.3"
   for_each = local.azs
 
   name            = "nat-${each.key}"
