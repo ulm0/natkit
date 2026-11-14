@@ -259,6 +259,17 @@ jobs:
             aws ec2 wait instance-terminated --instance-ids $ids
           fi
           for e in $(aws ec2 describe-network-interfaces --output text --query 'NetworkInterfaces[].NetworkInterfaceId' --filters "$tag"); do
+            # its routes first: one left behind would keep every later test waiting for the route table
+            for t in $(aws ec2 describe-route-tables --output text --query 'RouteTables[].RouteTableId' --filters "Name=route.network-interface-id,Values=$e"); do
+              for d in $(aws ec2 describe-route-tables --route-table-ids "$t" --output text \
+                --query "RouteTables[0].Routes[?NetworkInterfaceId=='$e'].[DestinationCidrBlock || DestinationIpv6CidrBlock]"); do
+                echo "deleting $t's route to $d"
+                case $d in
+                  *:*) aws ec2 delete-route --route-table-id "$t" --destination-ipv6-cidr-block "$d" ;;
+                  *) aws ec2 delete-route --route-table-id "$t" --destination-cidr-block "$d" ;;
+                esac
+              done
+            done
             echo "deleting $e"
             aws ec2 delete-network-interface --network-interface-id "$e"
           done

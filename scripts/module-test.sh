@@ -17,7 +17,8 @@
 #
 # Needs tofu (or TF=terraform), AWS credentials + AWS_REGION, NATKIT_BUCKET and the boot test's
 # NATKIT_TEST_PUBLIC_SUBNET, NATKIT_TEST_PRIVATE_SUBNET and NATKIT_TEST_INSTANCE_PROFILE (scripts/boot-test.sh).
-# One at a time, and not while a boot test runs: both route the private subnet.
+# One at a time, and not while a boot test runs: both route the private subnet. It waits (up to 30 min) while the
+# subnet's route table has a default route, another test's.
 set -eu
 cd "$(dirname "$0")/.."
 TAG=${NATKIT_MODULE_TEST_TAG:-$1}
@@ -110,6 +111,17 @@ C=''
 trap cleanup EXIT
 tf init -reconfigure -backend-config="bucket=$NATKIT_BUCKET" -backend-config="key=$KEY" -backend-config="region=$AWS_REGION" >"$L/init.log" 2>&1 ||
 	{ tail -n 20 "$L/init.log" >&2; die "init"; }
+
+rt=$(aws ec2 describe-route-tables --filters "Name=association.subnet-id,Values=$TF_VAR_private_subnet" --query 'RouteTables[0].RouteTableId' --output text)
+# shortcut: a check, not a lock: a boot test can take the route between this check and tofu's create (two runs at
+# once, a tag push and a manual run); this test then fails at apply (1) with RouteAlreadyExists. Run it again.
+for _ in $(seq 60); do
+	busy=$(aws ec2 describe-route-tables --route-table-ids "$rt" --query "length(RouteTables[0].Routes[?DestinationCidrBlock=='0.0.0.0/0'])" --output text)
+	[ "$busy" = 0 ] && break
+	echo "$rt has a default route (another test's?), waiting" >&2
+	sleep 30
+done
+[ "$busy" = 0 ] || die "$rt still has a default route after 30 min: another test, or one that left it behind"
 
 echo "== 1. the defaults"
 apply 1

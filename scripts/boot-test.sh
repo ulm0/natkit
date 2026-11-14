@@ -10,19 +10,22 @@
 #  4. handover: instance B boots with the same user-data but NAT64 (the default) while A holds the ENI: B must take
 #     the ENI over and the EIP; A is then terminated, and the client's egress must work through B
 #  5. the CloudWatch agent on B (pulled at boot) must publish mem_used_percent
+#  6. the smallest instance type (0.5 GiB), with nothing but `metrics`: its root must be in memory, and
+#     natkit-metrics, which runs where the agent doesn't fit, must publish
 # When the subnets have IPv6 CIDRs, NAT64 too: the route table gets 64:ff9b::/96 -> the ENI and the client reaches an
 # IPv4-only address through it over IPv6 (step 4, through B); the egress must again be the EIP.
 # Everything is tagged natkit.io/boot-test=<tag> and removed on exit (CI's boot-cleanup also removes it by tag).
 #
 #   scripts/boot-test.sh <ami-id> <arm64|amd64>
 #
-# Needs AWS credentials + AWS_REGION and:
+# One test at a time routes the private subnet: this one waits (up to 30 min) while its route table has a default
+# route, another test's. Needs AWS credentials + AWS_REGION and:
 #   NATKIT_TEST_PUBLIC_SUBNET        subnet with an internet gateway route (the NAT instances)
 #   NATKIT_TEST_PRIVATE_SUBNET       subnet with its own route table and no other egress (the client), same VPC/AZ;
 #                                    no IPv6 egress either (no egress-only gateway), or the NAT64 check proves nothing
 #   NATKIT_TEST_INSTANCE_PROFILE     NAT role: ec2:AssociateAddress, ec2:AttachNetworkInterface,
 #                                    ec2:DetachNetworkInterface, ec2:DescribeNetworkInterfaces,
-#                                    ec2:ModifyNetworkInterfaceAttribute, ssm:GetParameter, CloudWatchAgentServerPolicy
+#                                    ec2:ModifyNetworkInterfaceAttribute, ssm:GetParameter, cloudwatch:PutMetricData
 # Both subnets' instances use the VPC's default security group (admits traffic from itself).
 # Runs on Linux (CI) or macOS: e.g. against the AMIs of a `build` run dispatched with boot_test off, with
 # NATKIT_BOOT_TEST_TAG set to something unique. One at a time: every run routes the private subnet through its ENI.
@@ -39,12 +42,12 @@ esac
 PARAM=/natkit/boot-test/$TAG/cwagent
 NS=natkit-boot-test
 TAGS="{Key=natkit.io/boot-test,Value=$TAG}"
-eip='' eni='' a='' b='' client='' rt='' v6='' ud=$(mktemp) cud=$(mktemp) err=$(mktemp)
+eip='' eni='' a='' b='' client='' nano='' rt='' v6='' ud=$(mktemp) cud=$(mktemp) err=$(mktemp)
 
 cleanup() {
 	set +e
 	# shellcheck disable=SC2086 # word splitting on purpose: the IDs set so far
-	ids=$(echo $a $b $client)
+	ids=$(echo $a $b $client $nano)
 	if [ -n "$ids" ]; then
 		# shellcheck disable=SC2086
 		aws ec2 terminate-instances --instance-ids $ids >/dev/null
@@ -88,12 +91,20 @@ eip_ip=$(aws ec2 describe-addresses --allocation-ids "$eip" --query 'Addresses[0
 eni=$(aws ec2 create-network-interface --subnet-id "$PUB" --description "natkit boot test $TAG" ${v6:+--ipv6-address-count 1} \
 	--tag-specifications "ResourceType=network-interface,Tags=[$TAGS]" --query NetworkInterface.NetworkInterfaceId --output text)
 aws ec2 modify-network-interface-attribute --network-interface-id "$eni" --no-source-dest-check
-rt=$(aws ec2 describe-route-tables --filters "Name=association.subnet-id,Values=$PRIV" --query 'RouteTables[0].RouteTableId' --output text)
-[ "$rt" != None ] || { rt=; die "$PRIV has no route table of its own"; }
-aws ec2 create-route --route-table-id "$rt" --destination-cidr-block 0.0.0.0/0 --network-interface-id "$eni" >/dev/null ||
-	aws ec2 replace-route --route-table-id "$rt" --destination-cidr-block 0.0.0.0/0 --network-interface-id "$eni"
-[ -z "$v6" ] || aws ec2 create-route --route-table-id "$rt" --destination-ipv6-cidr-block 64:ff9b::/96 --network-interface-id "$eni" >/dev/null ||
-	aws ec2 replace-route --route-table-id "$rt" --destination-ipv6-cidr-block 64:ff9b::/96 --network-interface-id "$eni"
+t=$(aws ec2 describe-route-tables --filters "Name=association.subnet-id,Values=$PRIV" --query 'RouteTables[0].RouteTableId' --output text)
+[ "$t" != None ] || die "$PRIV has no route table of its own"
+# another test's default route: wait for it to go, and never replace it. $rt (what cleanup removes) is only set
+# once the route is this test's.
+for _ in $(seq 60); do
+	busy=$(aws ec2 describe-route-tables --route-table-ids "$t" --query "length(RouteTables[0].Routes[?DestinationCidrBlock=='0.0.0.0/0'])" --output text)
+	[ "$busy" = 0 ] && break
+	echo "$t has a default route (another test's?), waiting" >&2
+	sleep 30
+done
+[ "$busy" = 0 ] || die "$t still has a default route after 30 min: another test, or one that left it behind"
+aws ec2 create-route --route-table-id "$t" --destination-cidr-block 0.0.0.0/0 --network-interface-id "$eni" >/dev/null
+rt=$t
+[ -z "$v6" ] || aws ec2 create-route --route-table-id "$rt" --destination-ipv6-cidr-block 64:ff9b::/96 --network-interface-id "$eni" >/dev/null
 aws ssm put-parameter --name "$PARAM" --type String --overwrite --value \
 	"{\"metrics\":{\"namespace\":\"$NS\",\"append_dimensions\":{\"InstanceId\":\"\${aws:InstanceId}\"},\"metrics_collected\":{\"mem\":{\"measurement\":[\"mem_used_percent\"],\"metrics_collection_interval\":60}}}}" >/dev/null
 echo "EIP $eip ($eip_ip), ENI $eni, route table $rt" >&2
@@ -206,4 +217,24 @@ for _ in $(seq 40); do
 	c=0
 done
 [ "$c" -gt 0 ] || { console "$b" | tr -d '\r' | grep -a 'natkit-cwagent' | tail -n 20 >&2; die "B: no CloudWatch agent metrics after 10 min"; }
+
+# 6. the smallest instance type, a plain NAT with the allowance metrics
+case $ARCH in arm64) TYPE=t4g.nano ;; amd64) TYPE=t3.nano ;; esac
+echo "metrics: natkit-boot-test" >"$ud"
+nano=$(nat natkit-boot-test-nano)
+echo "nano $nano ($TYPE)" >&2
+l=$(line "$nano" 'natkit: ') || die "nano: no natkit line on the console after 15 min"
+echo "nano: $l"
+[ "$l" = "natkit: ready, public eth0 private eth0, eip none, nat64 on, cwagent off" ] || die "nano: not a plain NAT that is ready"
+console "$nano" | tr -d '\r' | grep -a -q 'natkit-boot: root in memory' ||
+	die "nano: $(console "$nano" | tr -d '\r' | grep -a 'natkit-boot: ' | tail -n 1): the root is not in memory"
+# end-anchored, not the whole line: the getty's login prompt can be in front of it, and a first report that failed
+# says "can't publish" before this
+l=$(line "$nano" 'natkit-metrics: publishing to CloudWatch, namespace natkit, Name=natkit-boot-test$') ||
+	die "nano: natkit-metrics doesn't publish after 15 min"
+echo "nano: $l"
+# the kernel's table at least EC2's allowance: below it, it fills first, where the allowance metrics don't see it
+l=$(console "$nano" | tr -d '\r' | grep -a 'natkit-init: EC2 conntrack allowance ' | tail -n 1)
+echo "nano: $l"
+echo "$l" | awk '{ exit !($5 + 0 > 0 && $7 + 0 >= $5 + 0) }' || die "nano: nf_conntrack_max below EC2's conntrack allowance"
 echo "boot test: ok" >&2

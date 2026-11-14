@@ -22,7 +22,8 @@ make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vm
 - a client in a private subnet whose egress must be the EIP;
 - a handover to a second instance, which takes the ENI over;
 - CloudWatch agent metrics;
-- NAT64, when the test subnets have IPv6.
+- NAT64, when the test subnets have IPv6;
+- a 0.5 GiB instance: its root in memory, and the allowance metrics published.
 
 On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](../opentofu/) and checks:
 
@@ -32,4 +33,4 @@ On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](../opentof
 - a client outside `client_cidrs` gets nothing through, with `untracked`;
 - `tcp_established_timeout` reaches both ENIs.
 
-`tofu/ci` creates the CI role, test VPC and instance profile. See the [README](https://github.com/ulm0/natkit#ci) for the repository variables.
+`tofu/ci` creates the CI role, test VPC and instance profile. Both roles reach only the test VPC, what a test tagged and the module test's group and alarm. See the [README](https://github.com/ulm0/natkit#ci) for the repository variables.
