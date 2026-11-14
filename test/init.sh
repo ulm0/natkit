@@ -33,7 +33,8 @@ calls='curl -fsS http://$MOCK:8080/_calls' # $MOCK: expanded in the container
 echo "== no user-data: masquerade out of eth0, nothing else"
 run "" "natkit-init
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth0, eip none, nat64 off, cwagent off' ]
-	nft list table ip natkit | grep -q 'oifname \"eth0\" masquerade'
+	nft list table ip natkit | grep -q 'oifname \"eth0\" meta l4proto { tcp, udp } masquerade to :1024-61000'
+	nft list table ip natkit | grep -q 'oifname \"eth0\" masquerade\$'
 	nft list table inet natkit | grep -q 'hook input priority filter; policy drop;'
 	nft list table inet natkit | grep -q 'ct state invalid drop'
 	nft list chain inet natkit forward | grep -q 'hook forward priority filter; policy accept;'
@@ -113,6 +114,14 @@ fails 'client_cidrs: ["2600:1f18::/129"]' "user-data: client_cidrs: bad value '2
 fails 'client_cidrs: ["2600:zz::/56"]' "user-data: client_cidrs: bad value '2600:zz::/56'"
 fails 'eip_id: eipalloc-0bad' "AssociateAddress eipalloc-0bad failed: natkit-init: AssociateAddress: HTTP 400 InvalidParameterValue: unexpected"
 fails '- a list' "user-data is not a YAML map"
+
+echo "== a setup that fails takes neither the ENI nor the EIP"
+run 'eip_id: eipalloc-0123
+eni_id: eni-0bbbbbbbbbbbbbbbb
+console_password: /natkit/test/plain' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
+	if natkit-init >/dev/null 2>&1; then exit 1; fi
+	grep -qF 'natkit: FAIL console_password' /tmp/console
+	[ \"\$($calls)\" = '[]' ]"
 
 echo "== a failed setup still leaves the getty a (locked) shadow file"
 run 'bogus: 1' "if natkit-init 2>/dev/null; then exit 1; fi; [ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]"

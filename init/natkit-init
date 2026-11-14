@@ -18,8 +18,10 @@
 #   cwagent_cfg_param_name: /natkit/cw    #   SSM parameter
 #   console_password: /natkit/root-hash   # SSM parameter: root's crypt hash for the serial console getty
 #
-# AWS calls (EC2, SSM) are signed with the instance role by curl --aws-sigv4. Then: nftables masquerade out of the
-# public interface, rp_filter off, NAT64 (Jool, pool6 64:ff9b::/96), no more module loading. One result line goes to the serial console:
+# AWS calls (EC2, SSM) are signed with the instance role by curl --aws-sigv4. In order: nftables masquerade out of
+# the public interface, forwarding and tuning sysctls, NAT64 (Jool, pool6 64:ff9b::/96), no more module loading,
+# the SSM parameters, and only then the static ENI and the EIP: an instance whose setup fails takes neither.
+# One result line goes to the serial console:
 #   natkit: ready, public <if> private <if>, eip <id>|none, nat64 on|off, cwagent on|off
 #   natkit: FAIL <reason>
 set -eu
@@ -183,76 +185,13 @@ eni_mac() {
 	return 1
 }
 
+# the public interface: the primary ENI's, or user-data's `interface` (ignored with eni_id)
 eni_id=$(val eni_id)
-if [ -n "$eni_id" ]; then
-	log "turning off $primary_eni's source/dest check"
-	retry 10 "ModifyNetworkInterfaceAttribute $primary_eni" ec2 ModifyNetworkInterfaceAttribute \
-		"NetworkInterfaceId=$primary_eni" SourceDestCheck.Value=false
-	if ! eni_mac "$eni_id" >/dev/null; then
-		# an ASG replacement: the ENI stays attached to the old instance until it terminates. fck-nat waits forever;
-		# give up after 15 min so the console (getty) comes up and the failure is visible.
-		log "attaching $eni_id"
-		i=0
-		until ec2 AttachNetworkInterface "InstanceId=$iid" "NetworkInterfaceId=$eni_id" DeviceIndex=1 >/dev/null; do
-			i=$((i + 1))
-			[ "$i" -lt 180 ] || die "AttachNetworkInterface $eni_id: still failing after 15 min"
-			log "waiting for $eni_id to attach"
-			sleep 5
-		done
-	fi
-	i=0
-	until emac=$(eni_mac "$eni_id") && private=$(ifname "$emac"); do
-		i=$((i + 1))
-		[ "$i" -lt 120 ] || die "$eni_id attached, but no interface for it after 2 min"
-		sleep 1
-	done
-	ip link set dev "$private" up # its address comes from the dhcpcd service; forwarding doesn't need one
-	log "$eni_id is $private"
-elif [ -n "$(val interface)" ]; then
+if [ -z "$eni_id" ] && [ -n "$(val interface)" ]; then
 	public=$(val interface)
 	private=$public
 	[ -e "/sys/class/net/$public" ] || die "interface: no interface $public"
 fi
-
-# the EIP last (fck-nat takes it first): a replacement instance waiting for the static ENI must not pull the EIP
-# off the old instance, which is still the one routing
-eip_id=$(val eip_id)
-if [ -n "$eip_id" ]; then
-	log "associating $eip_id with $primary_eni"
-	retry 10 "AssociateAddress $eip_id" ec2 AssociateAddress "AllocationId=$eip_id" "NetworkInterfaceId=$primary_eni" AllowReassociation=true
-fi
-
-# forwarding, rp_filter and hardening (init/sysctl.conf): a key that doesn't take is a failed boot, not a NAT that
-# quietly doesn't forward. Written straight to /proc/sys: busybox's `sysctl -p` exits 0 on a bad key. Under
-# test/init.sh only the net.* keys (the container's own): the rest are the docker host's kernel.
-while IFS=' =' read -r k v; do
-	case $k in '' | '#'*) continue ;; esac
-	[ -n "${NATKIT_IMDS:-}" ] && [ "${k#net.}" = "$k" ] && continue
-	echo "$v" >"/proc/sys/$(echo "$k" | tr . /)" || die "sysctl $k=$v"
-done </etc/natkit/sysctl.conf
-
-# tuning, as fck-nat: only what user-data sets, except the conntrack table. The kernel sizes it for a host (about
-# 7 000 flows under 1 GiB, 65 536 up to 4 GiB) and a NAT that fills it drops every new connection ("nf_conntrack:
-# table full"). Default: one flow per 8 kB of RAM (a full table is about 4% of memory), a quarter as many buckets.
-# Not under test/init.sh: the table is the docker host's.
-s() { [ -z "$2" ] || sysctl -q -w "$1=$2" || die "sysctl $1=$2"; }
-cmax=$(val nf_conntrack_max)
-b=$(val nf_conntrack_buckets)
-if [ -z "${NATKIT_IMDS:-}" ]; then
-	[ -n "$cmax" ] || cmax=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) / 8))
-	[ -n "$b" ] || b=$((cmax / 4))
-fi
-s net.ipv4.ip_local_port_range "$(val ip_local_port_range)"
-s net.netfilter.nf_conntrack_max "$cmax"
-s net.netfilter.nf_conntrack_tcp_timeout_established "$(val nf_conntrack_tcp_timeout_established)"
-s net.ipv4.tcp_keepalive_time "$(val tcp_keepalive_time)"
-s net.ipv4.tcp_max_syn_backlog "$(val tcp_max_syn_backlog)"
-[ -z "$b" ] || echo "$b" >/sys/module/nf_conntrack/parameters/hashsize || die "nf_conntrack_buckets=$b"
-
-# rp_filter also per interface (the ENI attached just now included)
-for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 >"$f"; done
-# a router on one interface would tell clients to bypass it (ICMP redirects); the kernel ORs all with each interface
-for f in /proc/sys/net/ipv4/conf/*/send_redirects; do echo 0 >"$f"; done
 
 # client_cidrs: only these sources may open a connection through the NAT; replies to it always pass. Without it
 # the security group alone decides who may (as before). NAT64 is gated in prerouting, at raw priority: Jool takes
@@ -275,7 +214,9 @@ if [ "$clients" = true ]; then
 	}"
 fi
 
-# masquerade out of the public interface; one transaction, so there's no moment without the rule.
+# masquerade out of the public interface; one transaction, so there's no moment without the rule. TCP and UDP to
+# ports 1024-61000: Jool's NAT64 sessions use 61001-65535 of the same address, and masquerade otherwise keeps a
+# client's source port, which can be one of those.
 # The instance itself accepts nothing new (it has no listening service; this keeps it so): replies, ICMP (path MTU,
 # IPv6 neighbour discovery) and DHCP only. Forwarded: packets conntrack can't place in a connection are dropped
 # (they'd skip the masquerade and leave with a private source), and new connections from outside client_cidrs.
@@ -285,7 +226,8 @@ flush ruleset
 table ip natkit {
 	chain postrouting {
 		type nat hook postrouting priority srcnat; policy accept;
-		oifname "$public" masquerade comment "NAT routing rule installed by natkit"
+		oifname "$public" meta l4proto { tcp, udp } masquerade to :1024-61000 comment "NAT routing rule installed by natkit"
+		oifname "$public" masquerade
 	}
 }
 table inet natkit {
@@ -318,6 +260,33 @@ if [ -n "$a" ]; then
 	log "$l"
 	echo "natkit-init: $l" >"$CONSOLE" 2>/dev/null || :
 fi
+
+# forwarding, rp_filter and hardening (init/sysctl.conf): a key that doesn't take is a failed boot, not a NAT that
+# quietly doesn't forward. Written straight to /proc/sys: busybox's `sysctl -p` exits 0 on a bad key. Under
+# test/init.sh only the net.* keys (the container's own): the rest are the docker host's kernel.
+while IFS=' =' read -r k v; do
+	case $k in '' | '#'*) continue ;; esac
+	[ -n "${NATKIT_IMDS:-}" ] && [ "${k#net.}" = "$k" ] && continue
+	echo "$v" >"/proc/sys/$(echo "$k" | tr . /)" || die "sysctl $k=$v"
+done </etc/natkit/sysctl.conf
+
+# tuning, as fck-nat: only what user-data sets, except the conntrack table. The kernel sizes it for a host (about
+# 7 000 flows under 1 GiB, 65 536 up to 4 GiB) and a NAT that fills it drops every new connection ("nf_conntrack:
+# table full"). Default: one flow per 8 kB of RAM (a full table is about 4% of memory), a quarter as many buckets.
+# Not under test/init.sh: the table is the docker host's.
+s() { [ -z "$2" ] || sysctl -q -w "$1=$2" || die "sysctl $1=$2"; }
+cmax=$(val nf_conntrack_max)
+b=$(val nf_conntrack_buckets)
+if [ -z "${NATKIT_IMDS:-}" ]; then
+	[ -n "$cmax" ] || cmax=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) / 8))
+	[ -n "$b" ] || b=$((cmax / 4))
+fi
+s net.ipv4.ip_local_port_range "$(val ip_local_port_range)"
+s net.netfilter.nf_conntrack_max "$cmax"
+s net.netfilter.nf_conntrack_tcp_timeout_established "$(val nf_conntrack_tcp_timeout_established)"
+s net.ipv4.tcp_keepalive_time "$(val tcp_keepalive_time)"
+s net.ipv4.tcp_max_syn_backlog "$(val tcp_max_syn_backlog)"
+[ -z "$b" ] || echo "$b" >/sys/module/nf_conntrack/parameters/hashsize || die "nf_conntrack_buckets=$b"
 
 # NAT64: Jool's modules (the jool image in natkit.yml's init) and its userspace tool (this image), same version.
 # With client_cidrs, address-dependent filtering: by default Jool lets any IPv4 host reach a client's mapping
@@ -363,6 +332,48 @@ if [ -n "$cp" ]; then
 	case $hash in '$'*) ;; *) die "console_password: $cp is not a crypt hash (openssl passwd -6)" ;; esac
 fi
 [ "$hash" = '*' ] || (umask 077 && echo "root:$hash::0:99999:7:::" >"$RUN/getty.shadow") # empty lastchg: 0 would force a password change
+
+# The static ENI and the EIP, last: everything that can fail has not, so an instance whose setup failed never takes
+# the route tables' traffic or the address.
+if [ -n "$eni_id" ]; then
+	log "turning off $primary_eni's source/dest check"
+	retry 10 "ModifyNetworkInterfaceAttribute $primary_eni" ec2 ModifyNetworkInterfaceAttribute \
+		"NetworkInterfaceId=$primary_eni" SourceDestCheck.Value=false
+	if ! eni_mac "$eni_id" >/dev/null; then
+		# an ASG replacement: the ENI stays attached to the old instance until it terminates. fck-nat waits forever;
+		# give up after 15 min so the console (getty) comes up and the failure is visible.
+		log "attaching $eni_id"
+		i=0
+		until ec2 AttachNetworkInterface "InstanceId=$iid" "NetworkInterfaceId=$eni_id" DeviceIndex=1 >/dev/null; do
+			i=$((i + 1))
+			[ "$i" -lt 180 ] || die "AttachNetworkInterface $eni_id: still failing after 15 min"
+			log "waiting for $eni_id to attach"
+			sleep 5
+		done
+	fi
+	i=0
+	until emac=$(eni_mac "$eni_id") && private=$(ifname "$emac"); do
+		i=$((i + 1))
+		[ "$i" -lt 120 ] || die "$eni_id attached, but no interface for it after 2 min"
+		sleep 1
+	done
+	ip link set dev "$private" up # its address comes from the dhcpcd service; forwarding doesn't need one
+	log "$eni_id is $private"
+fi
+
+# the EIP last (fck-nat takes it first): a replacement instance waiting for the static ENI must not pull the EIP
+# off the old instance, which is still the one routing
+eip_id=$(val eip_id)
+if [ -n "$eip_id" ]; then
+	log "associating $eip_id with $primary_eni"
+	retry 10 "AssociateAddress $eip_id" ec2 AssociateAddress "AllocationId=$eip_id" "NetworkInterfaceId=$primary_eni" AllowReassociation=true
+fi
+
+# rp_filter also per interface: the ENI attached just now has the defaults (conf/default), these make it explicit
+for f in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 >"$f"; done
+# a router on one interface would tell clients to bypass it (ICMP redirects); the kernel ORs all with each interface
+for f in /proc/sys/net/ipv4/conf/*/send_redirects; do echo 0 >"$f"; done
+
 
 console "ready, public $public private $private, eip ${eip_id:-none}, nat64 $nat64, cwagent $cwagent"
 log "done"
