@@ -1,0 +1,6 @@
+:root {
+  /* natkit copper (#b65116), the logo and favicon colour */
+  --primary-hue: 22deg;
+  --primary-saturation: 78%;
+  --primary-lightness: 40%;
+}

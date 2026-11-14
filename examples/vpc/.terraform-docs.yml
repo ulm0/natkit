@@ -6,7 +6,7 @@ content: |-
   {{ include "main.tf" }}
   ```
 output:
-  file: ../../docs/content/docs/vpc-module.md
+  file: ../../docs/content/docs/deploy/vpc-module.md
   mode: inject
 settings:
   lockfile: false

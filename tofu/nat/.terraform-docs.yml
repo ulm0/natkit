@@ -4,7 +4,7 @@ formatter: markdown table
 sections:
   show: [inputs, outputs]
 output:
-  file: ../../docs/content/docs/opentofu.md
+  file: ../../docs/content/docs/deploy/opentofu.md
   mode: inject
 sort:
   enabled: false # main.tf's order: the required inputs first

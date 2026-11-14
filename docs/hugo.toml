@@ -2,54 +2,71 @@ baseURL = "https://natkit.ulm0.com/"
 locale = "en"
 title = "natkit"
 enableGitInfo = true
+enableRobotsTXT = true
 
 [module]
   [module.hugoVersion]
     extended = true
+    min = "0.146.0"
   [[module.imports]]
-    path = "github.com/colinwilson/lotusdocs"
-  [[module.imports]]
-    path = "github.com/gohugoio/hugo-mod-bootstrap-scss/v5"
+    path = "github.com/imfing/hextra"
 
 [markup]
   [markup.goldmark.renderer]
-    unsafe = true
+    unsafe = true # terraform-docs' markers are HTML comments
+  [markup.highlight]
+    noClasses = false
   [markup.tableOfContents]
     startLevel = 2
     endLevel = 3
 
-[params]
-  description = "A NAT instance AMI for AWS on LinuxKit: fck-nat's features, immutable and in memory."
-  [params.footer]
-    copyright = "© :YEAR: natkit. MIT licensed."
-  [params.docs]
-    title = "natkit"
-    themeColor = "copper" # assets/docs/scss/custom/colors/_copper.scss
-    darkMode = true
-    prism = true
-    repoURL = "https://github.com/ulm0/natkit"
-    repoBranch = "main"
-    editPage = true
-    pathName = "docs"
-    lastMod = true
-    sidebarIcons = true
-    breadcrumbs = true
-    backToTop = true
-    toc = true
-    scrollSpy = true
-    descriptions = true
-    navDesc = true
-  [params.flexsearch]
-    enabled = true
-
 [menu]
-  [[menu.primary]]
+  [[menu.main]]
     name = "Docs"
-    url = "docs/"
-    identifier = "docs"
-    weight = 10
-  [[menu.primary]]
+    pageRef = "/docs"
+    weight = 1
+  [[menu.main]]
+    name = "Search"
+    weight = 2
+    [menu.main.params]
+      type = "search"
+  [[menu.main]]
     name = "GitHub"
     url = "https://github.com/ulm0/natkit"
-    identifier = "github"
-    weight = 20
+    weight = 3
+    [menu.main.params]
+      icon = "github"
+
+[params]
+  description = "A NAT instance AMI for AWS on LinuxKit: fck-nat's features, immutable and in memory."
+  displayUpdatedDate = true
+  dateFormat = "January 2, 2006"
+  [params.navbar]
+    displayTitle = true
+    displayLogo = true
+    width = "wide"
+    [params.navbar.logo]
+      path = "images/logo.svg" # the same mark as the favicons (static/)
+      width = 28
+      height = 28
+  [params.theme]
+    default = "system"
+    displayToggle = true
+  [params.footer]
+    enable = true
+    displayCopyright = true # i18n/en.yaml
+    displayPoweredBy = true
+  [params.search]
+    enable = true
+    type = "flexsearch"
+    [params.search.flexsearch]
+      index = "content"
+      tokenize = "forward"
+  [params.editURL]
+    enable = true
+    base = "https://github.com/ulm0/natkit/edit/main/docs/content"
+  [params.highlight.copy]
+    enable = true
+    display = "hover"
+  [params.page]
+    width = "normal"
