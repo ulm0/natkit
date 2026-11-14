@@ -256,8 +256,11 @@ for f in /proc/sys/net/ipv4/conf/*/send_redirects; do echo 0 >"$f"; done
 fwd_policy=accept fwd='' sets='' pre=''
 if [ "$clients" = true ]; then
 	fwd_policy=drop
-	sets="set clients4 { type ipv4_addr; flags interval; auto-merge;${c4:+ elements = { $c4 };} }
-	set clients6 { type ipv6_addr; flags interval; auto-merge;${c6:+ elements = { $c6 };} }"
+	e4='' e6='' # not ${c4:+...}: the set's braces would close the expansion
+	[ -z "$c4" ] || e4="elements = { $c4 }"
+	[ -z "$c6" ] || e6="elements = { $c6 }"
+	sets="set clients4 { type ipv4_addr; flags interval; auto-merge; $e4 }
+	set clients6 { type ipv6_addr; flags interval; auto-merge; $e6 }"
 	fwd="ct state established,related accept
 		ip saddr @clients4 accept
 		ip6 saddr @clients6 accept"

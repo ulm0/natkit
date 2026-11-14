@@ -36,7 +36,10 @@ module "nat" {
 | `instance_type` | `t4g.micro` | see [instance size](../getting-started/#instance-size): `*.nano` sizes are rejected |
 | `eip` | `true` | allocate an EIP and have the instance take it. Otherwise it egresses from its own public IP, which changes on replacement |
 | `nat64` | `false` | route `64:ff9b::/96` to the ENI and give it an IPv6 address (the subnet needs an IPv6 CIDR) |
-| `ipv6_cidr` | `null` | the VPC's IPv6 CIDR, admitted by the security group: needed with `nat64` |
+| `ipv6_cidr` | `null` | the VPC's IPv6 CIDR, a default client with `nat64` |
+| `client_cidrs` | the VPC's IPv4 CIDRs, plus `ipv6_cidr` | sources that may route through the NAT: the static ENI's security group (unless `untracked`) and natkit's [`client_cidrs`](../configuration/) |
+| `untracked` | `false` | open the static ENI's security group to all traffic, so EC2 doesn't track the flows through it. See [Performance](../performance/) |
+| `tcp_established_timeout` | EC2's | EC2's idle timeout in seconds (60 to 432 000) for the established TCP connections it tracks, on both ENIs. See [Performance](../performance/) |
 | `settings` | `{}` | more [user-data keys](../configuration/) |
 | `cwagent_cfg_param_name` | `null` | SSM parameter with a CloudWatch agent JSON config: enables the agent |
 | `console_password_param` | `null` | SSM parameter with root's crypt hash for the EC2 Serial Console |
@@ -44,8 +47,19 @@ module "nat" {
 
 ## Outputs
 
-`eni_id`, `public_ip` (the EIP, with `eip = true`), `security_group_id`, `role_name`.
+`eni_id`, `public_ip` (the EIP, with `eip = true`), `security_group_id` (the static ENI's), `public_security_group_id` (the instance's primary ENI's), `role_name`.
+
+## Security groups
+
+| ENI | Inbound | Outbound |
+|---|---|---|
+| Primary (public) | nothing: replies to the NAT's own connections only | all |
+| Static (the route tables' target) | `client_cidrs`, or all with `untracked` | all |
+
+The static ENI has to admit the clients: to EC2, a packet a client sends to the internet through the NAT is inbound traffic on that ENI.
 
 ## Updates
 
-A new AMI or new user-data replaces the instance through an instance refresh. There is only one instance, so egress stops until the new one has the ENI.
+A new AMI, new user-data or a change to the primary ENI's security group replaces the instance through an instance refresh. There is only one instance, so egress stops until the new one has the ENI.
+
+Upgrading the module from v0.1.1 or earlier does this once: it splits the one security group into two and adds `client_cidrs` to the user-data.
