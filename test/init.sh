@@ -1,11 +1,14 @@
 #!/bin/sh
-# Runs init/natkit-init against a mock IMDS + EC2 + SSM (test/mock.py) in docker, privileged (nftables, sysctls,
-# a dummy interface standing in for the static ENI).  Usage: test/init.sh  (builds ghcr.io/ulm0/natkit/init:latest)
+# Runs natkit (init/: natkit-init, natkit-metrics, natkit-cwagent) against a mock IMDS + EC2 + SSM + Auto Scaling +
+# CloudWatch (test/mock.py) in docker, privileged (nftables, sysctls, a dummy interface standing in for the static
+# ENI).  Usage: test/init.sh  (builds ghcr.io/ulm0/natkit/init:latest, and the test image on it: test/Dockerfile)
 set -eu
 cd "$(dirname "$0")/.."
 IMG=ghcr.io/ulm0/natkit/init:latest
+TEST=natkit-init-test
 NET=natkit-init-test
 docker build -q -t "$IMG" init >/dev/null 2>&1 || docker build --progress plain -t "$IMG" init # again, with the log
+docker build -q -t "$TEST" --build-arg IMG="$IMG" test >/dev/null
 docker network create "$NET" >/dev/null
 trap 'docker rm -f natkit-mock >/dev/null 2>&1; docker network rm "$NET" >/dev/null; rm -f test/.user-data.yaml' EXIT
 
@@ -28,7 +31,7 @@ run() {
 		-e "NATKIT_SSM=http://$mock:8080/" -e "NATKIT_AUTOSCALING=http://$mock:8080/" \
 		-e "NATKIT_CLOUDWATCH=http://$mock:8080/" -e NATKIT_CONSOLE=/tmp/console \
 		-e "ENA=$ena" -v "$PWD/test/ethtool:/usr/local/bin/ethtool:ro" \
-		--entrypoint /bin/sh "$IMG" -c "set -e; $2"
+		--entrypoint /bin/sh "$TEST" -c "set -e; $2"
 }
 # fails <user-data> <console reason>: natkit-init must exit non-zero and put the reason on the console
 fails() {
@@ -175,7 +178,7 @@ console_password: /natkit/test/plain' "if natkit-init >/dev/null 2>&1; then exit
 echo "== metrics: a report that can't be sent says why on the console"
 ENA=1 run 'metrics: nat-a' "natkit-init
 	if NATKIT_CLOUDWATCH=http://127.0.0.1:9/ NATKIT_METRICS_CYCLES=1 natkit-metrics; then exit 1; fi
-	grep -q \"natkit-metrics: can't publish: PutMetricData: curl: \" /tmp/console"
+	grep -q \"natkit-metrics: can't publish: PutMetricData: Post .*connection refused\" /tmp/console"
 
 echo "== nat64: false is accepted (and off)"
 run 'nat64: false' "natkit-init | grep -q 'NAT64: off in user-data'"
@@ -223,12 +226,21 @@ lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type d
 	grep -qF 'natkit: FAIL AssociateAddress eipalloc-0bad failed: natkit-init: AssociateAddress: HTTP 400 InvalidParameterValue: unexpected' /tmp/console
 	[ \"\$($calls | yq -p json -o json -I0 'map(.Action) | unique')\" = '[\"DescribeAutoScalingInstances\",\"RecordLifecycleActionHeartbeat\",\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"CompleteLifecycleAction\",\"AssociateAddress\"]' ]"
 
-echo "== a command that fails outside die (here, reading the region) still leaves a result line"
+echo "== metadata it can't read (here, the region) is a failure the console shows"
 NO_REGION=1 run "" "if natkit-init >/dev/null 2>&1; then exit 1; fi
-	grep -q 'natkit: FAIL natkit-init stopped with status' /tmp/console"
+	grep -qF 'natkit: FAIL instance metadata placement/region: HTTP 404' /tmp/console"
 
 echo "== a failed setup still leaves the getty a (locked) shadow file"
 run 'bogus: 1' "if natkit-init 2>/dev/null; then exit 1; fi; [ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]"
+
+echo "== natkit-cwagent without its config: nothing to run"
+run "" "natkit-cwagent | grep -qx 'natkit-cwagent: not enabled'"
+
+echo "== the image: one natkit binary under its three names, and no shell tooling (it lives in RAM)"
+docker run --rm --entrypoint /bin/sh "$IMG" -c 'for n in natkit-init natkit-metrics natkit-cwagent; do
+	[ "$(readlink /usr/bin/$n)" = natkit ] || exit 1; done
+	natkit version | grep -q . && ! command -v curl && ! command -v yq && ! command -v ip' >/dev/null ||
+	{ echo "FAIL: the image's natkit binary or its contents"; exit 1; }
 
 echo "== the jool tool matches the modules' version"
 docker run --rm --entrypoint jool "$IMG" --version | grep -q '4\.1\.15' || { echo "FAIL: jool tool isn't 4.1.15"; exit 1; }

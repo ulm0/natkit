@@ -9,7 +9,7 @@ aliases: [/docs/comparison/]
 |---|---|
 | Amazon Linux 2023, systemd unit `fck-nat.service` | LinuxKit `onboot` container `natkit-init` |
 | `/etc/fck-nat.conf` written by a cloud-init script | YAML user-data with the same keys |
-| `aws` CLI | `curl --aws-sigv4` with the instance role |
+| `aws` CLI, shell scripts | one Go binary (`natkit-init`, `natkit-metrics`, `natkit-cwagent`) on the AWS SDK for Go, with the instance role |
 | `iptables -t nat ... MASQUERADE` | one nftables ruleset, applied atomically |
 | Jool 4.1.15 built with DKMS, only in the separate `nat64-` AMIs | Jool 4.1.15 modules built against natkit's kernel, in every AMI |
 | CloudWatch agent installed | CloudWatch agent pulled by digest at boot, only when enabled |

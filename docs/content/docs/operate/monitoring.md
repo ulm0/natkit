@@ -22,7 +22,7 @@ About once a minute it sends two metrics to the `natkit` namespace, with the dim
 | `conntrack_allowance_exceeded` | packets EC2 dropped because the allowance ran out, since the last report, on any interface. Alarm on its sum being above 0 |
 | `conntrack_allowance_available` | tracked connections left before it runs out |
 
-- It is a shell loop and one signed request: it runs on a 0.5 GiB instance.
+- It is one signed request a minute from natkit's own binary, no agent: it runs on a 0.5 GiB instance.
 - The instance role needs `cloudwatch:PutMetricData`. It can be limited to the namespace with the condition `cloudwatch:namespace = natkit`.
 - Use a name that outlives the instance, such as the Auto Scaling group's: the instance ID changes with every replacement.
 - The console says `natkit-metrics: publishing to CloudWatch, namespace natkit, Name=nat-a` when it starts, and `natkit-metrics: can't publish: <reason>` if it stops.

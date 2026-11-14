@@ -27,7 +27,7 @@ onboot:
     image: linuxkit/dhcpcd:b87e9ececac55a65eaa592f4dd8b4e0c3009afdb@sha256:c58b85778641b3d153f4094a9ae7aea62829fc0f84126fb15a2bb26041861ada
     command: ["/sbin/dhcpcd", "--nobackground", "-f", "/dhcpcd.conf", "-1"]
   # IMDSv2 user-data -> EIP, static ENI, nftables masquerade, tuning, NAT64, CloudWatch agent config
-  # (init/natkit-init). Its result goes to the serial console as one line.
+  # (init/natkit-init.go). Its result goes to the serial console as one line.
   - name: natkit-init
     image: ghcr.io/ulm0/natkit/init:latest # init/; `make init-image` builds it locally
     capabilities:
@@ -69,7 +69,7 @@ services:
     binds.add:
       - /etc/natkit/ntpd.conf:/etc/ntpd.conf
   # CloudWatch agent, only with user-data cwagent_enabled: pulled by digest at boot through the system containerd
-  # and run in the host network (init/natkit-cwagent). Otherwise it exits at once and costs no memory.
+  # and run in the host network (init/cwagent.go). Otherwise it exits at once and costs no memory.
   - name: cwagent
     image: ghcr.io/ulm0/natkit/init:latest
     net: host
@@ -92,8 +92,8 @@ services:
         minor: 1
         mode: "0600"
     command: ["/usr/bin/natkit-cwagent"]
-  # EC2's connection-tracking allowance counters to CloudWatch, only with user-data metrics (init/natkit-metrics):
-  # a shell loop and one signed request a minute. Otherwise it exits at once.
+  # EC2's connection-tracking allowance counters to CloudWatch, only with user-data metrics (init/metrics.go):
+  # one signed request a minute. Otherwise it exits at once.
   - name: metrics
     image: ghcr.io/ulm0/natkit/init:latest
     net: host

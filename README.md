@@ -11,7 +11,7 @@ Docs: [natkit.ulm0.com](https://natkit.ulm0.com).
 |---|---|
 | Amazon Linux 2023, systemd unit `fck-nat.service` | LinuxKit `onboot` container `natkit-init` |
 | `/etc/fck-nat.conf` written by a cloud-init script | YAML user-data with the same keys |
-| `aws` CLI | `curl --aws-sigv4` with the instance role |
+| `aws` CLI, shell scripts | one Go binary (`natkit-init`, `natkit-metrics`, `natkit-cwagent`) on the AWS SDK for Go, with the instance role |
 | `iptables -t nat ... MASQUERADE` | one nftables ruleset, applied atomically |
 | Jool 4.1.15 built with DKMS, only in the separate `nat64-` AMIs | Jool 4.1.15 modules built against natkit's kernel, in every AMI |
 | CloudWatch agent installed | CloudWatch agent pulled by digest at boot, only when enabled |
@@ -134,7 +134,7 @@ the optional metrics) is in the docs: [Costs](https://natkit.ulm0.com/docs/opera
 - The instance accepts no new inbound connections to itself (nftables input policy drop: replies, ICMP and DHCP
   only). It forwards new connections only from `client_cidrs`, when set (the module always sets it), and drops
   packets conntrack calls invalid, which would otherwise leave un-NATed.
-- AWS credentials reach `curl` on stdin, never on a command line.
+- AWS credentials stay in natkit's memory (the instance role's, through IMDSv2): never on a command line or in a file.
 - Kernel: built up from `allnoconfig`, without USB, wireless, `/dev/mem`, kexec or 32-bit syscalls, and with CPU
   mitigations, KASLR, stack protector, hardened usercopy and zeroed allocations. It is shared with yagan and limakit,
   so it also carries what they need (KVM, kprobes and perf, the BPF JIT, WireGuard, IPVS, and filesystems such as
@@ -153,7 +153,8 @@ Everything builds natively for the Docker daemon's architecture (arm64 or amd64)
 ```sh
 make jool          # Jool modules for natkit.yml's kernel (lk-kernel); or let linuxkit pull them from GHCR
 make               # out/natkit-<arch>-efi.img
-make test          # natkit-init against a mock IMDS/EC2/SSM
+make test          # natkit's Go unit tests, then the image against a mock IMDS, EC2, SSM, Auto Scaling and CloudWatch
+cd init && go test ./...   # the unit tests alone (Go 1.27)
 make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vmimport role
 terraform-docs tofu/nat   # the OpenTofu module page's Inputs and Outputs, from tofu/nat's descriptions
 terraform-docs examples/vpc   # the VPC module page's example, from examples/vpc/main.tf
