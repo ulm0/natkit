@@ -113,7 +113,7 @@ jobs:
           path: bin
           key: linuxkit-${{ runner.arch }}-${{ hashFiles('Makefile') }}
           restore-keys: linuxkit-${{ runner.arch }}-
-      - run: shellcheck -S warning init/natkit-init init/natkit-cwagent jool/jool.sh scripts/*.sh test/init.sh
+      - run: shellcheck -S warning init/natkit-init init/natkit-cwagent jool/jool.sh scripts/*.sh scripts/initramfs-init test/init.sh
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io

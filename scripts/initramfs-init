@@ -1,0 +1,49 @@
+#!/bin/busybox sh
+# natkit's initramfs /init (scripts/disk.sh builds the initramfs: this and a static busybox). Copies the squashfs
+# root partition into memory and mounts it from there, so after boot nothing is read from the EBS volume. The
+# squashfs stays compressed in memory (about 65 MB, against about 190 MB for the root unpacked). Without the memory
+# for it, the root is mounted from the disk instead. Then linuxkit's /init.
+# The root partition is the GPT partition named natkit-root: the kernel names it in the partition's uevent.
+/bin/busybox --install -s /bin
+export PATH=/bin
+mount -t devtmpfs devtmpfs /dev
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+exec >/dev/console 2>&1
+say() { echo "natkit-boot: $*"; }
+
+part=''
+i=0
+while [ -z "$part" ]; do
+	for u in /sys/class/block/*/uevent; do
+		grep -qx 'PARTNAME=natkit-root' "$u" && part=$(sed -n 's/^DEVNAME=//p' "$u") && break
+	done
+	[ -n "$part" ] && break
+	i=$((i + 1))
+	if [ $i -gt 600 ]; then
+		say "FAIL no partition named natkit-root after 60 s"
+		while :; do sleep 3600; done
+	fi
+	sleep 0.1
+done
+
+# the partition's size, plus 1 MiB for tmpfs's own use; MemAvailable must keep at least 128 MiB more
+need=$(($(cat "/sys/class/block/$part/size") * 512 + 1048576))
+avail=$(($(sed -n 's/^MemAvailable: *\([0-9]*\) kB$/\1/p' /proc/meminfo) * 1024))
+mkdir -p /ram /newroot
+if [ $((avail - need)) -ge $((128 * 1048576)) ] && mount -t tmpfs -o "size=$need,mode=0700" tmpfs /ram &&
+	cat "/dev/$part" >/ram/root.squashfs && mount -t squashfs -o loop,ro /ram/root.squashfs /newroot; then
+	say "root in memory, $((need / 1048576)) MiB"
+else
+	umount /ram 2>/dev/null
+	mount -t squashfs -o ro "/dev/$part" /newroot || {
+		say "FAIL can't mount /dev/$part"
+		while :; do sleep 3600; done
+	}
+	say "root on /dev/$part (not enough memory to copy it)"
+fi
+
+# linuxkit's init mounts these itself
+umount /proc /sys
+mount --move /dev /newroot/dev
+exec switch_root /newroot /init

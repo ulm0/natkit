@@ -34,12 +34,12 @@ init-image: $(wildcard init/*)
 	touch $@
 
 # kernel+squashfs: the kernel and a read-only squashfs root. scripts/disk.sh makes the GPT disk from them: an ESP
-# with systemd-boot and the kernel, and the root on partition 2 (no initramfs: see disk.sh).
-$(IMG): natkit.yml init-image scripts/disk.sh | $(LK)
+# with systemd-boot, the kernel and a small initramfs that copies the root into memory, and the root on partition 2.
+$(IMG): natkit.yml init-image scripts/disk.sh scripts/initramfs-init | $(LK)
 	mkdir -p out && $(LK) build --docker $(DECOMPRESS) --format kernel+squashfs --arch $(ARCH) --dir out --name natkit-$(ARCH) natkit.yml
 	tar -C out -c natkit-$(ARCH)-kernel natkit-$(ARCH)-cmdline natkit-$(ARCH)-squashfs.img | docker run --rm -i \
-		-v $(CURDIR)/scripts/disk.sh:/disk.sh:ro $(ALPINE) sh -c \
-		'apk add -q dosfstools mtools sgdisk systemd-boot >&2 && sh /disk.sh natkit-$(ARCH)' >$@.tmp
+		-v $(CURDIR)/scripts/disk.sh:/disk.sh:ro -v $(CURDIR)/scripts/initramfs-init:/initramfs-init:ro $(ALPINE) sh -c \
+		'apk add -q dosfstools mtools sgdisk systemd-boot busybox-static cpio >&2 && sh /disk.sh natkit-$(ARCH)' >$@.tmp
 	mv $@.tmp $@
 
 # Jool's modules for natkit.yml's kernel, for the docker daemon's architecture (otherwise linuxkit pulls them)

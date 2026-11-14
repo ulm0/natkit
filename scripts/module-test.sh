@@ -105,7 +105,7 @@ refreshed() {
 
 C=''
 trap cleanup EXIT
-tf init -backend-config="bucket=$NATKIT_BUCKET" -backend-config="key=$KEY" -backend-config="region=$AWS_REGION" >"$L/init.log" 2>&1 ||
+tf init -reconfigure -backend-config="bucket=$NATKIT_BUCKET" -backend-config="key=$KEY" -backend-config="region=$AWS_REGION" >"$L/init.log" 2>&1 ||
 	{ tail -n 20 "$L/init.log" >&2; die "init"; }
 
 echo "== 1. the defaults"
