@@ -11,14 +11,15 @@ trap 'docker rm -f natkit-mock >/dev/null 2>&1; docker network rm "$NET" >/dev/n
 
 # run <user-data or ""> <script>: the script runs natkit-init itself, then checks
 run() {
+	ena=${ENA:-}
 	docker rm -f natkit-mock >/dev/null 2>&1 || :
 	[ -z "$1" ] || printf '%s\n' "$1" >test/.user-data.yaml
 	docker run -d --name natkit-mock --network "$NET" -e "NO_DESCRIBE=${NO_DESCRIBE:-}" -e "ATTACHED=${ATTACHED:-}" \
 		-e "ASG_STATE=${ASG_STATE:-}" -e "NO_COMPLETE=${NO_COMPLETE:-}" -e "NO_REGION=${NO_REGION:-}" -e "THROTTLE=${THROTTLE:-}" \
-		-e "CREDS_LATE=${CREDS_LATE:-}" \
+		-e "CREDS_LATE=${CREDS_LATE:-}" -e "CW_FAIL=${CW_FAIL:-}" \
 		-v "$PWD/test/mock.py:/mock.py:ro" ${1:+-v "$PWD/test/.user-data.yaml:/user-data:ro"} python:3.13-alpine python /mock.py >/dev/null
 	# a case's `X=1 run ...` outlives the call in some shells (macOS's /bin/sh): the mock has them, the next case mustn't
-	unset NO_DESCRIBE ATTACHED ASG_STATE NO_COMPLETE NO_REGION THROTTLE CREDS_LATE
+	unset NO_DESCRIBE ATTACHED ASG_STATE NO_COMPLETE NO_REGION THROTTLE CREDS_LATE CW_FAIL ENA
 	sleep 1
 	# by IP: natkit-init's `flush ruleset` also removes docker's embedded-DNS rules in this container
 	mock=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' natkit-mock)
@@ -26,7 +27,7 @@ run() {
 		-e "NATKIT_IMDS=http://$mock:8080/latest" -e "NATKIT_EC2=http://$mock:8080/" \
 		-e "NATKIT_SSM=http://$mock:8080/" -e "NATKIT_AUTOSCALING=http://$mock:8080/" \
 		-e "NATKIT_CLOUDWATCH=http://$mock:8080/" -e NATKIT_CONSOLE=/tmp/console \
-		-e "ENA=${ENA:-}" -v "$PWD/test/ethtool:/usr/local/bin/ethtool:ro" \
+		-e "ENA=$ena" -v "$PWD/test/ethtool:/usr/local/bin/ethtool:ro" \
 		--entrypoint /bin/sh "$IMG" -c "set -e; $2"
 }
 # fails <user-data> <console reason>: natkit-init must exit non-zero and put the reason on the console
@@ -157,6 +158,19 @@ ENA=1 run 'metrics: nat-a' "ip link add eth9 type dummy
 	grep -qx 'natkit-metrics: publishing to CloudWatch, namespace natkit, Name=nat-a' /tmp/console
 	[ \"\$($calls | yq -p json -o json -I0 '.[0]')\" = '{\"Action\":\"PutMetricData\",\"Namespace\":\"natkit\",\"MetricData.member.1.MetricName\":\"conntrack_allowance_exceeded\",\"MetricData.member.1.Value\":\"0\",\"MetricData.member.1.Unit\":\"Count\",\"MetricData.member.1.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.1.Dimensions.member.1.Value\":\"nat-a\",\"MetricData.member.2.MetricName\":\"conntrack_allowance_available\",\"MetricData.member.2.Value\":\"1234\",\"MetricData.member.2.Unit\":\"Count\",\"MetricData.member.2.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.2.Dimensions.member.1.Value\":\"nat-a\"}' ]
 	[ \"\$($calls | yq -p json -o json -I0 'map(.[\"MetricData.member.1.Value\"])')\" = '[\"0\",\"5\"]' ]"
+
+echo "== metrics: a report that fails is not lost: the next one covers it"
+# cycle 1 reads 12 (where the counting starts), cycle 2 reads 17 and fails, cycle 3 reads 22: 10 since cycle 1
+CW_FAIL=2 ENA=1 run 'metrics: nat-a' "ip link add eth9 type dummy
+	natkit-init
+	NATKIT_METRICS_CYCLES=3 natkit-metrics
+	grep -q \"natkit-metrics: can't publish: PutMetricData: HTTP 500 InternalFailure: try again\" /tmp/console
+	[ \"\$($calls | yq -p json -o json -I0 'map(.[\"MetricData.member.1.Value\"])')\" = '[\"0\",\"5\",\"10\"]' ]"
+
+echo "== metrics: an instance that fails its setup doesn't publish"
+ENA=1 run 'metrics: nat-a
+console_password: /natkit/test/plain' "if natkit-init >/dev/null 2>&1; then exit 1; fi
+	[ ! -e /run/natkit/metrics ]"
 
 echo "== metrics: a report that can't be sent says why on the console"
 ENA=1 run 'metrics: nat-a' "natkit-init

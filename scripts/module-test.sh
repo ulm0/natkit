@@ -179,9 +179,14 @@ for _ in $(seq 20); do
 	sleep 15
 done
 [ "$d" != None ] || die "no conntrack_allowance_available datapoint for natkit-module-test"
-a=$(aws cloudwatch describe-alarms --alarm-names "$(out alarm)" --query 'MetricAlarms[0].StateValue' --output text)
+# OK, after minutes of reports: INSUFFICIENT_DATA would be an alarm that doesn't watch what natkit publishes
+for _ in $(seq 20); do
+	a=$(aws cloudwatch describe-alarms --alarm-names "$(out alarm)" --query 'MetricAlarms[0].StateValue' --output text)
+	[ "$a" != OK ] || break
+	sleep 15
+done
 echo "allowance available: $d, alarm: $a"
-[ "$a" = OK ] || [ "$a" = INSUFFICIENT_DATA ] || die "the alarm is $a"
+[ "$a" = OK ] || die "the alarm is $a"
 
 echo "== 5. client_cidrs without the client, untracked"
 pub=$(aws ec2 describe-subnets --subnet-ids "$TF_VAR_public_subnet" --query 'Subnets[0].CidrBlock' --output text)

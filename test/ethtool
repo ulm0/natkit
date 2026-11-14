@@ -1,11 +1,12 @@
 #!/bin/sh
 # test/init.sh's ethtool, ahead of the real one in the test container's PATH. With ENA set, "ethtool -S eth0" and
 # "ethtool -S eth9" have the ENA driver's allowance counters, which no interface of a container has.
-# conntrack_allowance_exceeded grows with every call: by 3 on eth0, from 7, and by 2 on eth9, from 5.
+# conntrack_allowance_exceeded grows with every call: by 3 on eth0, from 7, and by 2 on eth9, from 5. The lower
+# conntrack_allowance_available is eth9's, not the first interface's.
 [ -n "${ENA:-}" ] && [ "${1:-}" = -S ] || exec /usr/sbin/ethtool "$@"
 case $2 in
-eth0) from=7 by=3 left=1234 ;;
-eth9) from=5 by=2 left=1300 ;;
+eth0) from=7 by=3 left=1300 ;;
+eth9) from=5 by=2 left=1234 ;;
 *) exit 1 ;;
 esac
 n=$(cat "/tmp/ethtool.$2" 2>/dev/null || echo 0)

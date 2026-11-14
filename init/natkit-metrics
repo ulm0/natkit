@@ -5,8 +5,8 @@
 #   conntrack_allowance_exceeded   packets EC2 dropped because the allowance ran out, since the last report: on any
 #                                  interface (EC2 counts a drop on the ENI the packet was on). Alarm on Sum > 0.
 #   conntrack_allowance_available  tracked connections left before it runs out (the instance's, the same on every ENI)
-# The first cycle reports 0 dropped: its reading is where the counting starts. A report that fails is not lost: the
-# next one that gets through covers the time since the last one that did. That matters here, because a report is a
+# The first reading is where the counting starts: its report says 0 dropped, if it gets through. A report that fails
+# is not lost: the next one that gets through covers the time since the last one that did. That matters here, because a report is a
 # new connection too, and EC2 drops it like any other while the allowance is exhausted.
 set -u
 CONF=/run/natkit/metrics # natkit-init's: the name
@@ -23,17 +23,19 @@ imds() { curl -fsS -m 5 -H "X-aws-ec2-metadata-token: $t" "$IMDS/$1"; }
 # that got through.
 last=''
 publish() {
-	t=$(curl -fsS -m 2 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' "$IMDS/api/token" 2>&1) || { why="no instance metadata: $t"; return 1; }
-	region=$(imds meta-data/placement/region 2>&1) && profile=$(imds meta-data/iam/security-credentials/ 2>&1) &&
-		c=$(imds "meta-data/iam/security-credentials/$profile" 2>&1) || { why="no instance role"; return 1; }
+	# the counters first: a cycle that can't reach IMDS (the allowance exhausted) still sets where the counting starts
 	# shellcheck disable=SC2046 # split on purpose: the two numbers
 	set -- $(for d in /sys/class/net/*; do ethtool -S "${d##*/}" 2>/dev/null; done | awk '
 		$1 == "conntrack_allowance_exceeded:" { e += $2; n++ }
 		$1 == "conntrack_allowance_available:" { if (a == "" || $2 + 0 < a + 0) a = $2 }
 		END { if (n && a != "") print e, a }')
 	[ $# = 2 ] || { why="no conntrack_allowance counters on any interface"; return 1; }
-	# less than at the last report: an interface went (its ENI was taken over), start counting again
-	if [ -z "$last" ] || [ "$1" -lt "$last" ]; then dropped=0; else dropped=$(($1 - last)); fi
+	# the first reading, or less than at the last report (an interface went: its ENI was taken over): count from here
+	if [ -z "$last" ] || [ "$1" -lt "$last" ]; then last=$1; fi
+	dropped=$(($1 - last))
+	t=$(curl -fsS -m 2 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' "$IMDS/api/token" 2>&1) || { why="no instance metadata: $t"; return 1; }
+	region=$(imds meta-data/placement/region 2>&1) && profile=$(imds meta-data/iam/security-credentials/ 2>&1) &&
+		c=$(imds "meta-data/iam/security-credentials/$profile" 2>&1) || { why="no instance role"; return 1; }
 	# the credentials on stdin (-K -), not on the command line, where /proc would show them
 	r=$(printf 'user = "%s:%s"\nheader = "x-amz-security-token: %s"\n' "$(echo "$c" | yq -p json .AccessKeyId)" \
 		"$(echo "$c" | yq -p json .SecretAccessKey)" "$(echo "$c" | yq -p json .Token)" |

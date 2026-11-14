@@ -314,12 +314,10 @@ if [ -n "$a" ]; then
 	log "$l"
 	echo "natkit-init: $l" >"$CONSOLE" 2>/dev/null || :
 fi
-# metrics: natkit-metrics (a service) publishes the allowance counters when this file, with the name, exists
+# metrics: natkit-metrics (a service) publishes the allowance counters when this file, with the name, exists.
+# Written by in_service(): an instance that fails its setup doesn't route, and mustn't report under the NAT's name.
 rm -f "$RUN/metrics"
-if [ -n "$(val metrics)" ]; then
-	[ -n "$a" ] || die "metrics: no conntrack_allowance counters on $public (not an ENA interface?)"
-	val metrics >"$RUN/metrics"
-fi
+[ -z "$(val metrics)" ] || [ -n "$a" ] || die "metrics: no conntrack_allowance counters on $public (not an ENA interface?)"
 
 # NAT64: Jool's modules (the jool image in natkit.yml's init) and its userspace tool (this image), same version.
 # With client_cidrs, address-dependent filtering: by default Jool lets any IPv4 host reach a client's mapping
@@ -376,6 +374,7 @@ fi
 # in_service: completes the hook, once. A failure here leaves an instance that routes but that the group will
 # replace when the hook times out: the console says why.
 in_service() {
+	[ -z "$(val metrics)" ] || val metrics >"$RUN/metrics"
 	[ -n "$hook_group" ] || return 0
 	retry 10 "CompleteLifecycleAction $hook" asg CompleteLifecycleAction "AutoScalingGroupName=$hook_group" \
 		"LifecycleHookName=$hook" "InstanceId=$iid" LifecycleActionResult=CONTINUE

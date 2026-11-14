@@ -8,7 +8,8 @@
 # (Pending:Wait); ASG_STATE=InService for an instance already in service, ASG_STATE=none for one in no group;
 # NO_COMPLETE denies CompleteLifecycleAction. NO_REGION: the metadata has no region. THROTTLE: the first
 # DescribeNetworkInterfaces and the first DetachNetworkInterface are throttled. CREDS_LATE: the instance role's
-# credentials are missing the first time they're asked for, as right after launch.
+# credentials are missing the first time they're asked for, as right after launch. CW_FAIL=<n>: the nth
+# PutMetricData fails (500), recorded all the same.
 # GET /_calls lists the EC2, Auto Scaling and CloudWatch actions and their parameters.
 import json, os
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -121,6 +122,8 @@ class H(BaseHTTPRequestHandler):
         if "/us-east-1/monitoring/" in auth:
             ok = action == "PutMetricData" and p.pop("Version", "") == "2010-08-01"
             calls.append({"Action": action, **p})
+            if ok and os.environ.get("CW_FAIL") == str(sum(c["Action"] == "PutMetricData" for c in calls)):
+                return self.reply(500, asg_err("InternalFailure", "try again"))
             return self.reply(200 if ok else 400, ok_xml(action) if ok else asg_err("InvalidParameterValue", "unexpected"))
         if "/us-east-1/ec2/" not in auth:
             return self.reply(403, err_xml("AuthFailure", "wrong service"))

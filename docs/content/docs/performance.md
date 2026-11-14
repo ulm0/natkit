@@ -81,8 +81,6 @@ Without the module, set [`metrics`](../cloudwatch/#allowance-metrics) in the use
       "ethtool": {
         "interface_include": ["eth0", "eth1"],
         "metrics_include": [
-          "conntrack_allowance_available",
-          "conntrack_allowance_exceeded",
           "pps_allowance_exceeded",
           "bw_in_allowance_exceeded",
           "bw_out_allowance_exceeded"
@@ -93,5 +91,5 @@ Without the module, set [`metrics`](../cloudwatch/#allowance-metrics) in the use
 }
 ```
 
-- `conntrack_allowance_available` is how many more connections EC2 will track. Alarm when it gets low.
-- `conntrack_allowance_exceeded` counts the packets EC2 dropped because the allowance ran out. It should stay flat.
+- natkit's `conntrack_allowance_exceeded` is the packets EC2 dropped since the last report because the allowance ran out. It should stay at 0. `conntrack_allowance_available` is how many more connections EC2 will track: alarm when it gets low.
+- The agent's `ethtool_pps_allowance_exceeded`, `ethtool_bw_in_allowance_exceeded` and `ethtool_bw_out_allowance_exceeded` are the driver's running counts of dropped packets. They should stay flat.
