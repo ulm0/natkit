@@ -79,9 +79,10 @@ lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type d
 echo "== static ENI without the permission to look it up: no takeover, waits for it"
 NO_DESCRIBE=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
 	natkit-init >/tmp/log
-	grep -q \"can't look up eni-0bbbbbbbbbbbbbbbb's attachment: waiting for it\" /tmp/log
+	grep -q \"can't take eni-0bbbbbbbbbbbbbbbb over, waiting for it: natkit-init: DescribeNetworkInterfaces: HTTP 403\" /tmp/log
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth9, eip none, nat64 off, cwagent off' ]
-	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"AttachNetworkInterface\",\"AttachNetworkInterface\"]' ]"
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action) | map(select(. != \"DescribeNetworkInterfaces\")) ')\" = '[\"ModifyNetworkInterfaceAttribute\",\"AttachNetworkInterface\",\"AttachNetworkInterface\"]' ]
+	[ \"\$($calls | yq -p json 'map(select(.Action == \"DescribeNetworkInterfaces\")) | length')\" = 10 ]"
 
 echo "== static ENI already attached (a reboot): nothing detached or attached"
 ATTACHED=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
@@ -111,9 +112,8 @@ lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type d
 	grep -qF \"natkit: FAIL eni-0bbbbbbbbbbbbbbbb: can't take it over, and its instance stays until this one is in service (lifecycle_hook): natkit-init: DescribeNetworkInterfaces: HTTP 403 UnauthorizedOperation: not authorized\" /tmp/console
 	if $calls | grep -q AttachNetworkInterface; then exit 1; fi"
 
-echo "== lifecycle_hook: held by the hook, a throttled lookup or detach is tried again"
-THROTTLE=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb
-lifecycle_hook: natkit-ready' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
+echo "== without the hook too, a throttled lookup or detach is tried again"
+THROTTLE=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
 	natkit-init
 	grep -q 'natkit: ready' /tmp/console
 	[ \"\$($calls | yq -p json -o json -I0 'map(.Action) | map(select(test(\"NetworkInterfaces?\$\")))')\" = '[\"DescribeNetworkInterfaces\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"DescribeNetworkInterfaces\",\"DetachNetworkInterface\",\"AttachNetworkInterface\",\"AttachNetworkInterface\"]' ]"
