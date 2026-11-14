@@ -25,6 +25,8 @@
 # One result line goes to the serial console:
 #   natkit: ready, public <if> private <if>, eip <id>|none, nat64 on|off, cwagent on|off
 #   natkit: FAIL <reason>
+# A failed instance also reports itself unhealthy to its Auto Scaling group, if it has one (and the permission to):
+# the group replaces it, and keeps the instance it was going to replace.
 set -eu
 
 IMDS=${NATKIT_IMDS:-http://169.254.169.254/latest} # overrides: test/init.sh
@@ -34,13 +36,48 @@ UD=$RUN/user-data
 JOOL_POOL6=64:ff9b::/96
 console() { echo "natkit: $*" >"$CONSOLE" 2>/dev/null || :; }
 log() { echo "natkit-init: $*"; }
-die() { echo "natkit-init: $*" >&2; console "FAIL $*"; exit 1; }
+die() {
+	echo "natkit-init: $*" >&2
+	console "FAIL $*"
+	unhealthy
+	exit 1
+}
 
 umask 022
 mkdir -p "$RUN"
 # the getty binds this file: it must exist even if the setup fails below, or there'd be no console to see why.
 # Root stays locked until console_password replaces it.
 (umask 077 && echo 'root:*::0:99999:7:::' >"$RUN/getty.shadow")
+
+imds() { curl -fsS -m 5 -H "X-aws-ec2-metadata-token: $T" "$IMDS/$1"; }
+# instance role credentials, fetched once (natkit-init is done long before they expire); status 1 without a role
+creds() {
+	[ -z "${ak:-}" ] || return 0
+	profile=$(imds meta-data/iam/security-credentials/ 2>/dev/null) || return 1
+	c=$(imds "meta-data/iam/security-credentials/$profile") || return 1
+	ak=$(echo "$c" | yq -p json .AccessKeyId)
+	sk=$(echo "$c" | yq -p json .SecretAccessKey)
+	st=$(echo "$c" | yq -p json .Token)
+}
+# signed <service> <curl args...>: curl with SigV4; the credentials go in on stdin (-K -), not on the command line,
+# where /proc would show them
+signed() {
+	svc=$1
+	shift
+	printf 'user = "%s:%s"\nheader = "x-amz-security-token: %s"\n' "$ak" "$sk" "$st" |
+		curl -K - -sS --aws-sigv4 "aws:amz:$region:$svc" "$@"
+}
+# unhealthy (die's): tells the instance's Auto Scaling group to replace it. An instance refresh waits for a healthy
+# replacement before it terminates the old instance, and EC2's own health check passes on an instance whose setup
+# failed: without this the group would terminate the one instance that routes. Best effort: no group, no role or no
+# autoscaling:SetInstanceHealth is not an error.
+unhealthy() {
+	[ -n "${iid:-}" ] && creds || return 0
+	signed autoscaling -f -m 10 -o /dev/null --data-urlencode Action=SetInstanceHealth --data-urlencode Version=2011-01-01 \
+		--data-urlencode "InstanceId=$iid" --data-urlencode HealthStatus=Unhealthy \
+		--data-urlencode ShouldRespectGracePeriod=false "${NATKIT_AUTOSCALING:-https://autoscaling.$region.amazonaws.com/}" 2>/dev/null &&
+		log "reported unhealthy to the Auto Scaling group" || :
+}
 
 # IMDSv2 session token (hop limit 1 is enough: this container shares the host network)
 T=
@@ -49,7 +86,10 @@ for _ in $(seq 30); do
 	sleep 1
 done
 [ -n "$T" ] || die "no instance metadata service"
-imds() { curl -fsS -m 5 -H "X-aws-ec2-metadata-token: $T" "$IMDS/$1"; }
+region=$(imds meta-data/placement/region)
+iid=$(imds meta-data/instance-id)
+mac=$(imds meta-data/mac)
+primary_eni=$(imds "meta-data/network/interfaces/macs/$mac/interface-id")
 
 imds user-data >"$UD" 2>/dev/null || : # 404: no user-data
 [ -s "$UD" ] || echo '{}' >"$UD"
@@ -98,11 +138,6 @@ set +f
 # blank entries split to no words at all: a list of them would silently forward nothing
 [ "$clients" != true ] || [ -n "$c4$c6" ] || die "user-data: client_cidrs: not a list of CIDRs"
 
-region=$(imds meta-data/placement/region)
-iid=$(imds meta-data/instance-id)
-mac=$(imds meta-data/mac)
-primary_eni=$(imds "meta-data/network/interfaces/macs/$mac/interface-id")
-
 # ifname <mac>: the interface with this MAC (no udev here: no ENI-ID altnames as on Amazon Linux)
 ifname() {
 	for d in /sys/class/net/*; do
@@ -113,30 +148,12 @@ ifname() {
 public=$(ifname "$mac") || die "no interface with the primary ENI's MAC $mac"
 private=$public
 
-# instance role credentials, fetched once (natkit-init is done long before they expire)
-creds() {
-	[ -z "${ak:-}" ] || return 0
-	profile=$(imds meta-data/iam/security-credentials/) || die "$1: no instance profile"
-	c=$(imds "meta-data/iam/security-credentials/$profile")
-	ak=$(echo "$c" | yq -p json .AccessKeyId)
-	sk=$(echo "$c" | yq -p json .SecretAccessKey)
-	st=$(echo "$c" | yq -p json .Token)
-}
-# signed <service> <curl args...>: curl with SigV4; the credentials go in on stdin (-K -), not on the command line,
-# where /proc would show them
-signed() {
-	svc=$1
-	shift
-	printf 'user = "%s:%s"\nheader = "x-amz-security-token: %s"\n' "$ak" "$sk" "$st" |
-		curl -K - -sS --aws-sigv4 "aws:amz:$region:$svc" "$@"
-}
-
 # ec2 <Action> [Name=value ...]: an EC2 Query API call. The response XML on stdout; on an error the AWS error code
 # and message on stderr, and status 1.
 ec2() {
 	action=$1
 	shift
-	creds "$action"
+	creds || die "$action: no instance profile"
 	n=$#
 	for p; do set -- "$@" --data-urlencode "$p"; done
 	shift "$n"
@@ -166,7 +183,7 @@ retry() {
 
 # ssm <parameter> <what>: the decrypted value
 ssm() {
-	creds "$2"
+	creds || die "$2: no instance profile"
 	body=$(N=$1 yq -n -o json -I0 '{"Name": strenv(N), "WithDecryption": true}')
 	for i in $(seq 10); do
 		resp=$(signed ssm -f -m 10 -H 'Content-Type: application/x-amz-json-1.1' \
@@ -355,10 +372,13 @@ if [ -n "$eni_id" ]; then
 		fi
 		log "attaching $eni_id"
 		i=0
-		until ec2 AttachNetworkInterface "InstanceId=$iid" "NetworkInterfaceId=$eni_id" DeviceIndex=1 >/dev/null; do
+		until ec2 AttachNetworkInterface "InstanceId=$iid" "NetworkInterfaceId=$eni_id" DeviceIndex=1 >/dev/null 2>"$RUN/retry.err"; do
 			i=$((i + 1))
-			[ "$i" -lt 450 ] || die "AttachNetworkInterface $eni_id: still failing after 15 min"
-			[ $((i % 15)) != 1 ] || log "waiting for $eni_id to attach"
+			[ "$i" -lt 450 ] || die "AttachNetworkInterface $eni_id: still failing after 15 min: $(tr '\n' ' ' <"$RUN/retry.err")"
+			# the first refusal on the console: a wrong eni_id or a missing permission would otherwise show nothing
+			# there for 15 min. (In a handover it's the old instance's detach, still in progress.)
+			[ "$i" != 1 ] || echo "natkit-init: waiting for $eni_id: $(tr '\n' ' ' <"$RUN/retry.err")" >"$CONSOLE" 2>/dev/null || :
+			[ $((i % 15)) != 1 ] || log "waiting for $eni_id to attach: $(tr '\n' ' ' <"$RUN/retry.err")"
 			sleep 2
 		done
 	fi

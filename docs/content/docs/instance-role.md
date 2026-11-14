@@ -14,12 +14,15 @@ natkit only needs an instance role for the keys that call AWS:
     {"Effect": "Allow", "Action": "ec2:AssociateAddress", "Resource": "*"},
     {"Effect": "Allow", "Action": ["ec2:AttachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute"], "Resource": "*"},
     {"Effect": "Allow", "Action": ["ec2:DescribeNetworkInterfaces", "ec2:DetachNetworkInterface"], "Resource": "*"},
+    {"Effect": "Allow", "Action": "autoscaling:SetInstanceHealth", "Resource": "*"},
     {"Effect": "Allow", "Action": "ssm:GetParameter", "Resource": "arn:aws:ssm:*:*:parameter/natkit/*"}
   ]
 }
 ```
 
 The second EC2 statement lets a replacement instance [take the static ENI over](../high-availability/) from the one it replaces; without it, it waits for the ENI.
+
+`autoscaling:SetInstanceHealth` lets an instance whose setup failed [report itself unhealthy](../high-availability/#when-the-replacement-fails) to its Auto Scaling group. Without it, or outside a group, nothing is reported.
 
 With `cwagent_enabled`, also attach `CloudWatchAgentServerPolicy`.
 

@@ -78,9 +78,17 @@ variable "tcp_established_timeout" {
   }
 }
 variable "settings" {
-  description = "More natkit user-data keys: nf_conntrack_max, ip_local_port_range, tcp_keepalive_time, ..."
+  description = "natkit's tuning keys for the user-data: ip_local_port_range, nf_conntrack_max, nf_conntrack_buckets, nf_conntrack_tcp_timeout_established, tcp_keepalive_time, tcp_max_syn_backlog."
   type        = map(any)
   default     = {}
+  # natkit refuses a user-data key it doesn't know, at boot: a typo here would otherwise be a NAT that never comes up
+  validation {
+    condition = alltrue([for k in keys(var.settings) : contains([
+      "ip_local_port_range", "nf_conntrack_max", "nf_conntrack_buckets", "nf_conntrack_tcp_timeout_established",
+      "tcp_keepalive_time", "tcp_max_syn_backlog",
+    ], k)])
+    error_message = "settings: only ip_local_port_range, nf_conntrack_max, nf_conntrack_buckets, nf_conntrack_tcp_timeout_established, tcp_keepalive_time and tcp_max_syn_backlog. The other user-data keys come from this module's own variables."
+  }
 }
 variable "cwagent_cfg_param_name" {
   description = "SSM parameter with a CloudWatch agent JSON config: enables the agent. Needs 1 GiB of memory: a micro or larger."
@@ -261,6 +269,12 @@ resource "aws_iam_role_policy" "this" {
         Effect   = "Allow"
         Action   = "ec2:DescribeNetworkInterfaces"
         Resource = "*"
+        }, {
+        # an instance whose setup failed reports itself unhealthy: the group replaces it, and keeps the one that routes
+        Sid      = "ReportUnhealthy"
+        Effect   = "Allow"
+        Action   = "autoscaling:SetInstanceHealth"
+        Resource = "${local.arn}:autoscaling:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.name}-*"
       }],
       var.eip ? [{
         Sid      = "OwnEip"
@@ -361,7 +375,8 @@ resource "aws_autoscaling_group" "this" {
   }
   # A replacement (a new AMI or user-data, an unhealthy instance) launches before the old instance terminates, and
   # takes the ENI over once its own setup is done: egress stops for the handover only. The old instance goes
-  # after the warmup, whether or not the new one made it.
+  # after the warmup, if the new one is still healthy by then: one whose setup failed has reported itself unhealthy
+  # (natkit v0.1.4 and later), so the group replaces that one instead and the old instance keeps routing.
   instance_maintenance_policy {
     min_healthy_percentage = 100
     max_healthy_percentage = 200

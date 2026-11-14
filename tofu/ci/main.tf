@@ -97,6 +97,8 @@ resource "aws_iam_role_policy" "nat" {
     Statement = [
       { Effect = "Allow", Action = ["ec2:AssociateAddress", "ec2:AttachNetworkInterface", "ec2:DetachNetworkInterface", "ec2:DescribeNetworkInterfaces", "ec2:ModifyNetworkInterfaceAttribute"], Resource = "*" },
       { Effect = "Allow", Action = "ssm:GetParameter", Resource = [for p in local.test_params : "${local.ssm_arn}:parameter${p}"] },
+      # the module test's group: a NAT whose setup failed reports itself unhealthy
+      { Effect = "Allow", Action = "autoscaling:SetInstanceHealth", Resource = "${local.arn}:autoscaling:${local.region}:${local.account}:autoScalingGroup:*:autoScalingGroupName/natkit-module-test-*" },
     ]
   })
 }

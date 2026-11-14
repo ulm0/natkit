@@ -22,6 +22,16 @@ fck-nat takes the EIP first. That moves egress off the EIP while the old instanc
 
 The [OpenTofu module](../opentofu/) sets up this layout. Its Auto Scaling group launches the replacement before it terminates the old instance, so egress stops only for the handover: 14 seconds in a test. Connections open at that moment are cut, because the new instance doesn't know them.
 
+## When the replacement fails
+
+An instance whose setup fails prints `natkit: FAIL <reason>` on its console and takes neither the ENI nor the EIP. To EC2 it is still a healthy instance, so the Auto Scaling group would go on and terminate the old one, the only one routing.
+
+natkit therefore reports itself unhealthy to its group (`autoscaling:SetInstanceHealth`, in the [instance role](../instance-role/)). The group terminates the failed instance and launches another, and the old instance keeps routing until a replacement comes up healthy. A setting that natkit refuses stops the rollout; it doesn't stop egress.
+
+- The group keeps launching instances until the configuration is fixed. Each one runs for a minute or two.
+- The failed instances are terminated, so read the reason from their console output: `aws ec2 get-console-output --instance-id <id>`, with the instance ID from the group's activity history. EC2 keeps it for about an hour after the termination.
+- This needs natkit v0.1.4 or later on the new instance. An older image fails without telling the group.
+
 ## One NAT per Availability Zone
 
 The ASG keeps one instance alive, but that instance lives in a single AZ: if the AZ goes down, every private subnet loses egress until it comes back. For AZ-independent egress, like one NAT Gateway per AZ, run one natkit per AZ. The module already covers one AZ (one `subnet_id`), so instantiate it once per AZ:

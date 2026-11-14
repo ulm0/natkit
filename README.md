@@ -99,6 +99,7 @@ Only needed for the keys that call AWS:
     {"Effect": "Allow", "Action": "ec2:AssociateAddress", "Resource": "*"},
     {"Effect": "Allow", "Action": ["ec2:AttachNetworkInterface", "ec2:ModifyNetworkInterfaceAttribute"], "Resource": "*"},
     {"Effect": "Allow", "Action": ["ec2:DescribeNetworkInterfaces", "ec2:DetachNetworkInterface"], "Resource": "*"},
+    {"Effect": "Allow", "Action": "autoscaling:SetInstanceHealth", "Resource": "*"},
     {"Effect": "Allow", "Action": "ssm:GetParameter", "Resource": "arn:aws:ssm:*:*:parameter/natkit/*"}
   ]
 }

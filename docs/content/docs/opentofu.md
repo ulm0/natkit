@@ -40,7 +40,7 @@ module "nat" {
 | `client_cidrs` | the VPC's IPv4 CIDRs, plus `ipv6_cidr` | sources that may route through the NAT, in canonical form: the static ENI's security group (unless `untracked`) and natkit's [`client_cidrs`](../configuration/) |
 | `untracked` | `false` | open the static ENI's security group to all traffic, so EC2 doesn't track the flows through it. See [Performance](../performance/) |
 | `tcp_established_timeout` | EC2's | EC2's idle timeout in seconds (60 to 432 000) for the established TCP connections it tracks, on both ENIs. Going back to `null` leaves the static ENI at its last value. See [Performance](../performance/) |
-| `settings` | `{}` | more [user-data keys](../configuration/) |
+| `settings` | `{}` | natkit's tuning [user-data keys](../configuration/): `ip_local_port_range`, `nf_conntrack_max`, `nf_conntrack_buckets`, `nf_conntrack_tcp_timeout_established`, `tcp_keepalive_time`, `tcp_max_syn_backlog`. Any other key is refused at plan time |
 | `cwagent_cfg_param_name` | `null` | SSM parameter with a CloudWatch agent JSON config: enables the agent |
 | `conntrack_alarm_actions` | `null` | alarm when EC2 drops packets because the [connection-tracking allowance](../performance/) ran out, with these actions (SNS topic ARNs; `[]` for none). Runs the CloudWatch agent with the module's own config, so not together with `cwagent_cfg_param_name` |
 | `instance_profile` | `null` | an existing instance profile to use instead of the module's role, where IAM is managed elsewhere. Its role needs the [instance role](../instance-role/)'s permissions |

@@ -42,9 +42,9 @@ variable "tcp_established_timeout" {
   default = null
 }
 variable "keepalive" {
-  description = "A natkit setting: changing it changes the user-data, so the instance is refreshed."
-  type        = number
-  default     = 600
+  description = "A natkit setting: changing it changes the user-data, so the instance is refreshed. Not a number: natkit refuses it, and the replacement's setup fails."
+  type        = string
+  default     = "600"
 }
 
 data "aws_subnet" "public" {

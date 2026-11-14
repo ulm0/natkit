@@ -5,9 +5,11 @@
 #     private one the VPC's CIDRs
 #  2. handover: a user-data change refreshes the instance. The replacement launches first and takes the ENI over:
 #     the client may be without egress for at most NATKIT_HANDOVER_MAX seconds (default 30)
-#  3. conntrack alarm: the agent publishes the allowance counters under the group's name, and the alarm exists
-#  4. client_cidrs without the client's subnet, untracked: nothing gets out, IPv4 or NAT64 (natkit's nftables alone)
-#  5. the default client_cidrs, untracked, tcp_established_timeout 350: egress again, both ENIs at 350 s
+#  3. a replacement whose setup fails (a setting natkit refuses): it reports itself unhealthy, the group replaces
+#     it and not the old instance, and the client's egress never stops; a good setting then goes through
+#  4. conntrack alarm: the agent publishes the allowance counters under the group's name, and the alarm exists
+#  5. client_cidrs without the client's subnet, untracked: nothing gets out, IPv4 or NAT64 (natkit's nftables alone)
+#  6. the default client_cidrs, untracked, tcp_established_timeout 350: egress again, both ENIs at 350 s
 # Then it destroys everything. The state is s3://$NATKIT_BUCKET/module-test/<tag>.tfstate, so a run that was killed
 # can be destroyed from another machine (CI's boot-cleanup does).
 #
@@ -59,13 +61,14 @@ die() {
 	fi
 	exit 1
 }
-# ready <instance being replaced or ->: the new NAT instance's ID, once its console says ready
+# ready <instance being replaced or -> [failed]: the new NAT instance's ID, once its console says ready. An instance
+# whose setup failed ends the wait, unless it's stage 3's leftovers (failed).
 ready() {
 	for _ in $(seq 80); do
 		for n in $(nats); do
 			[ "$n" = "$1" ] && continue
 			l=$(con "$n" | grep -a 'natkit: ' | tail -n 1)
-			case $l in *ready*) echo "$n" && return 0 ;; *FAIL*) echo "$n: $l" >&2 && return 1 ;; esac
+			case $l in *ready*) echo "$n" && return 0 ;; *FAIL*) [ -n "${2:-}" ] || { echo "$n: $l" >&2 && return 1; } ;; esac
 		done
 		sleep 15
 	done
@@ -134,7 +137,35 @@ g=$(gap "$s0")
 echo "longest time without egress: $g s"
 [ "$g" -le "$MAX" ] || die "the handover took $g s, more than $MAX"
 
-echo "== 3. conntrack alarm"
+echo "== 3. a replacement that fails"
+s2=$(seqno)
+export TF_VAR_keepalive=soon
+apply 3
+f=''
+for _ in $(seq 40); do
+	for n in $(nats); do
+		[ "$n" = "$n2" ] || ! con "$n" | grep -a -q 'natkit: FAIL user-data: tcp_keepalive_time' || f=$n
+	done
+	[ -z "$f" ] || break
+	sleep 15
+done
+[ -n "$f" ] || die "no replacement refused its user-data"
+echo "NAT $f failed its setup"
+# past the warmup (90 s), after which the group used to terminate the old instance whatever the new one's state
+sleep 150
+nats | grep -qx "$n2" || die "the group terminated $n2, the instance that routes"
+! nats | grep -qx "$f" || die "the group kept $f, whose setup failed"
+g=$(gap "$s2")
+echo "longest time without egress: $g s"
+[ "$g" -le 10 ] || die "egress stopped for $g s while the replacements failed"
+export TF_VAR_keepalive=602
+apply 3b
+n2=$(ready "$n2" failed) || die "the replacement isn't ready"
+echo "NAT $n2"
+refreshed || die "the instance refresh didn't finish"
+works "$(seqno)" || die "no egress after the refresh"
+
+echo "== 4. conntrack alarm"
 for _ in $(seq 20); do
 	d=$(aws cloudwatch get-metric-statistics --namespace natkit --metric-name ethtool_conntrack_allowance_available \
 		--dimensions "Name=AutoScalingGroupName,Value=$ASG" --start-time "$(ago 900)" --end-time "$(ago 0)" --period 60 \
@@ -147,10 +178,10 @@ a=$(aws cloudwatch describe-alarms --alarm-names "$(out alarm)" --query 'MetricA
 echo "allowance available: $d, alarm: $a"
 [ "$a" = OK ] || [ "$a" = INSUFFICIENT_DATA ] || die "the alarm is $a"
 
-echo "== 4. client_cidrs without the client, untracked"
+echo "== 5. client_cidrs without the client, untracked"
 pub=$(aws ec2 describe-subnets --subnet-ids "$TF_VAR_public_subnet" --query 'Subnets[0].CidrBlock' --output text)
 export TF_VAR_client_cidrs="[\"$pub\"]" TF_VAR_untracked=true
-apply 4
+apply 5
 n3=$(ready "$n2") || die "the replacement isn't ready"
 echo "NAT $n3"
 refreshed || die "the instance refresh didn't finish"
@@ -160,10 +191,10 @@ p=$(probes "$s1")
 echo "$p" | tail -n 4
 [ "$(echo "$p" | grep -c ' none$')" -ge 6 ] && ! echo "$p" | grep -qv ' none$' || die "a client outside client_cidrs got through"
 
-echo "== 5. the default client_cidrs, untracked, tcp_established_timeout 350"
+echo "== 6. the default client_cidrs, untracked, tcp_established_timeout 350"
 unset TF_VAR_client_cidrs
 export TF_VAR_tcp_established_timeout=350
-apply 5
+apply 6
 n4=$(ready "$n3") || die "the replacement isn't ready"
 echo "NAT $n4"
 works "$(seqno)" || die "no egress"

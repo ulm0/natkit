@@ -13,14 +13,14 @@ trap 'docker rm -f natkit-mock >/dev/null 2>&1; docker network rm "$NET" >/dev/n
 run() {
 	docker rm -f natkit-mock >/dev/null 2>&1 || :
 	[ -z "$1" ] || printf '%s\n' "$1" >test/.user-data.yaml
-	docker run -d --name natkit-mock --network "$NET" -e "NO_DESCRIBE=${NO_DESCRIBE:-}" -v "$PWD/test/mock.py:/mock.py:ro" \
+	docker run -d --name natkit-mock --network "$NET" -e "NO_DESCRIBE=${NO_DESCRIBE:-}" -e "ATTACHED=${ATTACHED:-}" -v "$PWD/test/mock.py:/mock.py:ro" \
 		${1:+-v "$PWD/test/.user-data.yaml:/user-data:ro"} python:3.13-alpine python /mock.py >/dev/null
 	sleep 1
 	# by IP: natkit-init's `flush ruleset` also removes docker's embedded-DNS rules in this container
 	mock=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' natkit-mock)
 	docker run --rm --privileged --network "$NET" --mac-address 02:42:ac:11:00:99 -e "MOCK=$mock" \
 		-e "NATKIT_IMDS=http://$mock:8080/latest" -e "NATKIT_EC2=http://$mock:8080/" \
-		-e "NATKIT_SSM=http://$mock:8080/" -e NATKIT_CONSOLE=/tmp/console \
+		-e "NATKIT_SSM=http://$mock:8080/" -e "NATKIT_AUTOSCALING=http://$mock:8080/" -e NATKIT_CONSOLE=/tmp/console \
 		--entrypoint /bin/sh "$IMG" -c "set -e; $2"
 }
 # fails <user-data> <console reason>: natkit-init must exit non-zero and put the reason on the console
@@ -74,6 +74,12 @@ NO_DESCRIBE=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb' "ip link add eth9 address 02:4
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth9, eip none, nat64 off, cwagent off' ]
 	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"ModifyNetworkInterfaceAttribute\",\"DescribeNetworkInterfaces\",\"AttachNetworkInterface\",\"AttachNetworkInterface\"]' ]"
 
+echo "== static ENI already attached (a reboot): nothing detached or attached"
+ATTACHED=1 run 'eni_id: eni-0bbbbbbbbbbbbbbbb' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
+	natkit-init
+	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth0 private eth9, eip none, nat64 off, cwagent off' ]
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"ModifyNetworkInterfaceAttribute\"]' ]"
+
 echo "== interface: masquerade out of another interface"
 run 'interface: eth9' "ip link add eth9 type dummy
 	natkit-init
@@ -122,13 +128,17 @@ fails 'client_cidrs: ["2600:zz::/56"]' "user-data: client_cidrs: bad value '2600
 fails 'eip_id: eipalloc-0bad' "AssociateAddress eipalloc-0bad failed: natkit-init: AssociateAddress: HTTP 400 InvalidParameterValue: unexpected"
 fails '- a list' "user-data is not a YAML map"
 
-echo "== a setup that fails takes neither the ENI nor the EIP"
+echo "== a setup that fails takes neither the ENI nor the EIP, and reports itself unhealthy to its group"
 run 'eip_id: eipalloc-0123
 eni_id: eni-0bbbbbbbbbbbbbbbb
 console_password: /natkit/test/plain' "ip link add eth9 address 02:42:ac:11:00:98 type dummy
 	if natkit-init >/dev/null 2>&1; then exit 1; fi
 	grep -qF 'natkit: FAIL console_password' /tmp/console
-	[ \"\$($calls)\" = '[]' ]"
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"SetInstanceHealth\"]' ]"
+
+echo "== so does a refused user-data"
+run 'bogus: 1' "if natkit-init >/dev/null 2>&1; then exit 1; fi
+	[ \"\$($calls | yq -p json -o json -I0 'map(.Action)')\" = '[\"SetInstanceHealth\"]' ]"
 
 echo "== a failed setup still leaves the getty a (locked) shadow file"
 run 'bogus: 1' "if natkit-init 2>/dev/null; then exit 1; fi; [ \"\$(cat /run/natkit/getty.shadow)\" = 'root:*::0:99999:7:::' ]"

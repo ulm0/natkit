@@ -1,8 +1,10 @@
-# Mock EC2 IMDSv2 + EC2 Query API + SSM GetParameter for test/init.sh. User-data comes from /user-data, if mounted.
+# Mock EC2 IMDSv2 + EC2 Query API + SSM GetParameter + Auto Scaling SetInstanceHealth for test/init.sh. User-data
+# comes from /user-data, if mounted.
 # The primary ENI's MAC is the test container's (docker run --mac-address); the static ENI appears in the metadata
 # after AttachNetworkInterface. The ENI starts out on an old instance: DescribeNetworkInterfaces shows that attachment
 # (or is denied, with NO_DESCRIBE set), DetachNetworkInterface starts the detach, and the first attach still fails.
-# GET /_calls lists the EC2 actions and their parameters.
+# With ATTACHED set the instance already has it, as after a reboot.
+# GET /_calls lists the EC2 and Auto Scaling actions and their parameters.
 import json, os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qsl
@@ -23,7 +25,7 @@ META = {
 PARAMS = {"/natkit/test/root-hash": "$6$salt$hash", "/natkit/test/plain": "hunter2",
           "/natkit/test/cw": '{"metrics": {"namespace": "natkit"}}', "/natkit/test/notjson": "[1, 2]"}
 OLD_ATTACHMENT = "eni-attach-0ccccccccccccccc"
-calls, attached, attach_tries = [], False, 0
+calls, attached, attach_tries = [], bool(os.environ.get("ATTACHED")), 0
 
 
 def ok_xml(action):
@@ -69,10 +71,15 @@ class H(BaseHTTPRequestHandler):
             if "/us-east-1/ssm/" not in auth or req.get("WithDecryption") is not True or req["Name"] not in PARAMS:
                 return self.reply(400)
             return self.reply(200, json.dumps({"Parameter": {"Name": req["Name"], "Value": PARAMS[req["Name"]]}}).encode())
-        if "/us-east-1/ec2/" not in auth:
-            return self.reply(403, err_xml("AuthFailure", "wrong service"))
         p = dict(parse_qsl(body.decode()))
         action = p.pop("Action", "")
+        if "/us-east-1/autoscaling/" in auth:
+            ok = action == "SetInstanceHealth" and p == {"Version": "2011-01-01", "InstanceId": "i-0123456789abcdef0",
+                                                         "HealthStatus": "Unhealthy", "ShouldRespectGracePeriod": "false"}
+            calls.append({"Action": action})
+            return self.reply(200 if ok else 400, ok_xml(action) if ok else err_xml("ValidationError", "unexpected"))
+        if "/us-east-1/ec2/" not in auth:
+            return self.reply(403, err_xml("AuthFailure", "wrong service"))
         if p.pop("Version", "") != "2016-11-15":
             return self.reply(400, err_xml("InvalidParameterValue", "version"))
         calls.append({"Action": action, **p})
