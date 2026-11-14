@@ -1,7 +1,8 @@
 ---
 title: Configuration
 description: The YAML user-data keys.
-weight: 20
+weight: 10
+aliases: [/docs/configuration/]
 icon: tune
 ---
 
@@ -27,8 +28,8 @@ console_password: /natkit/root-hash   # SSM parameter holding `openssl passwd -6
 lifecycle_hook: natkit-ready          # the Auto Scaling group's launch lifecycle hook, completed when ready
 ```
 
-`client_cidrs` is a list of IPv4 and IPv6 CIDRs. With it, natkit forwards a new connection only from those sources; replies to a forwarded connection always pass. NAT64 serves only its IPv6 CIDRs, so a list with none turns NAT64 away for everyone, and Jool lets in only the IPv4 hosts a client has contacted (address-dependent filtering). Without it, the security group alone decides who can use the NAT. The [OpenTofu module](../opentofu/) always sets it.
+`client_cidrs` is a list of IPv4 and IPv6 CIDRs. With it, natkit forwards a new connection only from those sources; replies to a forwarded connection always pass. NAT64 serves only its IPv6 CIDRs, so a list with none turns NAT64 away for everyone, and Jool lets in only the IPv4 hosts a client has contacted (address-dependent filtering). Without it, the security group alone decides who can use the NAT. The [OpenTofu module](/docs/deploy/opentofu/) always sets it.
 
-An unknown key or a malformed value stops the setup. The console then prints `natkit: FAIL <reason>`. natkit attaches the static ENI and takes the EIP last, so an instance whose setup failed never receives the clients' traffic. With [`lifecycle_hook`](../high-availability/#when-the-replacement-fails), its Auto Scaling group also keeps the instance it was replacing.
+An unknown key or a malformed value stops the setup. The console then prints `natkit: FAIL <reason>`. natkit attaches the static ENI and takes the EIP last, so an instance whose setup failed never receives the clients' traffic. With [`lifecycle_hook`](/docs/how-it-works/high-availability/#when-the-replacement-fails), its Auto Scaling group also keeps the instance it was replacing.
 
-Keys that call AWS need an [instance role](../instance-role/).
+Keys that call AWS need an [instance role](/docs/reference/instance-role/).

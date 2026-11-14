@@ -1,7 +1,8 @@
 ---
 title: Building
 description: Build the image and AMI, and how CI tests them.
-weight: 100
+weight: 10
+aliases: [/docs/building/]
 icon: build
 ---
 
@@ -14,6 +15,7 @@ make test          # natkit-init against a mock IMDS/EC2/SSM
 make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vmimport role
 terraform-docs tofu/nat   # the OpenTofu module page's Inputs and Outputs, from tofu/nat's descriptions
 terraform-docs examples/vpc   # the VPC module page's example, from examples/vpc/main.tf
+hugo --source docs && python3 docs/check-links.py docs/public   # the docs site, and its links
 ```
 
 ## CI
@@ -27,7 +29,7 @@ terraform-docs examples/vpc   # the VPC module page's example, from examples/vpc
 - NAT64, when the test subnets have IPv6;
 - a 0.5 GiB instance: its root in memory, and the allowance metrics published.
 
-On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](../opentofu/) and checks:
+On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](/docs/deploy/opentofu/) and checks:
 
 - an instance refresh leaves the client without egress for at most 30 seconds;
 - a replacement whose setup fails doesn't stop egress;

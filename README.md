@@ -118,7 +118,7 @@ read-only root (a 66 MB squashfs) is copied from the EBS volume into memory, whi
 The CloudWatch agent needs 1 GiB (`t4g.micro`, `t3.micro`): its image doesn't fit in a nano's memory.
 
 What a deployment is billed for (the instance, its 1 GiB volume, the public IPv4 address, CPU credits, data transfer,
-the optional metrics) is in the docs: [Costs](https://natkit.ulm0.com/docs/costs/).
+the optional metrics) is in the docs: [Costs](https://natkit.ulm0.com/docs/operate/costs/).
 
 ## Hardening
 
@@ -147,6 +147,7 @@ make test          # natkit-init against a mock IMDS/EC2/SSM
 make ami           # needs AWS credentials, AWS_REGION, NATKIT_BUCKET and the vmimport role
 terraform-docs tofu/nat   # the OpenTofu module page's Inputs and Outputs, from tofu/nat's descriptions
 terraform-docs examples/vpc   # the VPC module page's example, from examples/vpc/main.tf
+hugo --source docs && python3 docs/check-links.py docs/public   # the docs site, and its links
 ```
 
 ## CI

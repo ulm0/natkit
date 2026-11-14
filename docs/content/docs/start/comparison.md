@@ -1,7 +1,8 @@
 ---
 title: natkit and fck-nat
 description: How natkit maps fck-nat's pieces.
-weight: 90
+weight: 30
+aliases: [/docs/comparison/]
 icon: compare_arrows
 ---
 

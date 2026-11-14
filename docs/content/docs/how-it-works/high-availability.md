@@ -1,7 +1,8 @@
 ---
 title: High availability
 description: An Auto Scaling group of one, a static ENI and an EIP.
-weight: 30
+weight: 10
+aliases: [/docs/high-availability/]
 icon: sync_alt
 ---
 
@@ -16,11 +17,11 @@ When an instance is replaced:
 2. It takes the ENI. If another instance holds it, natkit detaches it from that one (a forced detach) and attaches it.
 3. Once it has the ENI, it tells its group that it is in service ([`lifecycle_hook`](#when-the-replacement-fails)) and takes the EIP.
 
-The takeover needs `ec2:DescribeNetworkInterfaces` and `ec2:DetachNetworkInterface` in the [instance role](../instance-role/). Without them the new instance retries the attachment until the old one lets go, for up to 15 minutes, as fck-nat does.
+The takeover needs `ec2:DescribeNetworkInterfaces` and `ec2:DetachNetworkInterface` in the [instance role](/docs/reference/instance-role/). Without them the new instance retries the attachment until the old one lets go, for up to 15 minutes, as fck-nat does.
 
 fck-nat takes the EIP first. That moves egress off the EIP while the old instance is still routing. natkit takes the ENI first to avoid that gap.
 
-The [OpenTofu module](../opentofu/) sets up this layout. Its Auto Scaling group launches the replacement before it terminates the old instance, so egress stops only for the handover: 14 seconds in a test. Connections open at that moment are cut, because the new instance doesn't know them.
+The [OpenTofu module](/docs/deploy/opentofu/) sets up this layout. Its Auto Scaling group launches the replacement before it terminates the old instance, so egress stops only for the handover: 14 seconds in a test. Connections open at that moment are cut, because the new instance doesn't know them.
 
 ## When the replacement fails
 
@@ -44,10 +45,10 @@ An instance that fails before step 2, or never boots, doesn't complete the hook.
 - Each attempt is billed like any instance: its minutes, its volume and its public IPv4 address. Auto Scaling slows the launches down when a hook keeps failing.
 - If it can't complete the hook, it routes until the group terminates it at the hook's timeout. The old instance is still in service but no longer has the ENI, so egress stops until the next attempt takes it. Its console says `natkit: FAIL`.
 - A failure after step 3 leaves the new instance in service, because it is the only one that can still route. If it can't take the EIP, it egresses from its own public IP and its console says `natkit: FAIL`.
-- The instance role needs `autoscaling:DescribeAutoScalingInstances`, `autoscaling:RecordLifecycleActionHeartbeat` and `autoscaling:CompleteLifecycleAction`: see [instance role](../instance-role/).
+- The instance role needs `autoscaling:DescribeAutoScalingInstances`, `autoscaling:RecordLifecycleActionHeartbeat` and `autoscaling:CompleteLifecycleAction`: see [instance role](/docs/reference/instance-role/).
 - With the hook, the takeover permissions are required too: the old instance is not terminated first, so a new one that can't take the ENI over fails instead of waiting.
 
-The [OpenTofu module](../opentofu/) creates the hook and sets the key. For a group of your own:
+The [OpenTofu module](/docs/deploy/opentofu/) creates the hook and sets the key. For a group of your own:
 
 ```sh
 aws autoscaling put-lifecycle-hook --auto-scaling-group-name <group> --lifecycle-hook-name natkit-ready \

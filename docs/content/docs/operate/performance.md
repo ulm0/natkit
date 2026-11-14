@@ -1,7 +1,8 @@
 ---
 title: Performance
 description: What a load test measured, and what limits a NAT instance.
-weight: 75
+weight: 20
+aliases: [/docs/performance/]
 icon: speed
 ---
 
@@ -56,15 +57,15 @@ natkit-init: EC2 conntrack allowance 153911, nf_conntrack_max 153911
 | `t4g.nano`, `t4g.micro` | about 154 000 | about 77 000 | about 154 000 |
 | `c7gn.medium` | about 103 000 | about 51 000 | about 103 000 |
 
-A flow through a NAT instance counts twice, once on each network interface, unless the static ENI is untracked. A closed connection frees its entries after a minute or two, so the limit applies to flows opened within that window. AWS doesn't publish the allowance: read it from the console line or the counters below.
+A flow through a NAT instance counts twice, once on each network interface, unless the static ENI is untracked. A closed connection frees its entries after a minute or two, so the limit applies to flows opened within that window. AWS doesn't publish the allowance: read it from the console line or the [allowance metrics](/docs/operate/monitoring/#allowance-metrics).
 
-**The kernel's connection tracking.** Linux sizes its own table for a host: about 7 000 flows under 1 GiB of memory. natkit raises the default to one flow per 8 kB of memory, and at least EC2's allowance: below it, the kernel's table fills first, and the [allowance metrics](../cloudwatch/#allowance-metrics) don't see that. On a `t4g.nano` that's about 154 000 instead of 55 000, about 60 MB of its memory when full. Set [`nf_conntrack_max`](../configuration/) to change it. A full table logs `nf_conntrack: table full, dropping packet` on the serial console.
+**The kernel's connection tracking.** Linux sizes its own table for a host: about 7 000 flows under 1 GiB of memory. natkit raises the default to one flow per 8 kB of memory, and at least EC2's allowance: below it, the kernel's table fills first, and the [allowance metrics](/docs/operate/monitoring/#allowance-metrics) don't see that. On a `t4g.nano` that's about 154 000 instead of 55 000, about 60 MB of its memory when full. Set [`nf_conntrack_max`](/docs/reference/configuration/) to change it. A full table logs `nf_conntrack: table full, dropping packet` on the serial console.
 
 ## Get more out of the allowance
 
-**Untrack the static ENI.** EC2 doesn't track a TCP or UDP flow whose security group admits all traffic in both directions (`0.0.0.0/0`, or `::/0` for IPv6). With the [OpenTofu module](../opentofu/)'s `untracked = true`, the static ENI's security group does that, and each flow through the NAT counts once, on the public ENI. In the test above, a burst of 100 000 connections used about 90 000 of the `t4g.micro`'s allowance instead of exhausting it.
+**Untrack the static ENI.** EC2 doesn't track a TCP or UDP flow whose security group admits all traffic in both directions (`0.0.0.0/0`, or `::/0` for IPv6). With the [OpenTofu module](/docs/deploy/opentofu/)'s `untracked = true`, the static ENI's security group does that, and each flow through the NAT counts once, on the public ENI. In the test above, a burst of 100 000 connections used about 90 000 of the `t4g.micro`'s allowance instead of exhausting it.
 
-- The security group then admits everyone on the static ENI. natkit's [`client_cidrs`](../configuration/), which the module always sets, is what keeps other sources from using the NAT.
+- The security group then admits everyone on the static ENI. natkit's [`client_cidrs`](/docs/reference/configuration/), which the module always sets, is what keeps other sources from using the NAT.
 - ICMP is always tracked.
 - Connections that come through an NLB, a NAT gateway, PrivateLink, Global Accelerator, a Network Firewall endpoint or an egress-only internet gateway are tracked regardless.
 - Turning `untracked` off, or changing the rule, cuts the untracked flows at once: EC2 has no state to keep them.
@@ -76,31 +77,4 @@ A flow through a NAT instance counts twice, once on each network interface, unle
 
 ## Watch the limit
 
-With the [OpenTofu module](../opentofu/), `conntrack_alarm_actions` sets this up: natkit publishes the counters and a CloudWatch alarm goes off when EC2 drops packets, or when the NAT stops reporting. No agent is involved, so it works on a 0.5 GiB instance.
-
-```hcl
-conntrack_alarm_actions = [aws_sns_topic.alerts.arn]
-```
-
-Without the module, set [`metrics`](../cloudwatch/#allowance-metrics) in the user-data and alarm on the sum of `conntrack_allowance_exceeded`. For the other allowances (packets per second, bandwidth), the [CloudWatch agent](../cloudwatch/#the-cloudwatch-agent) can publish the ENA driver's counters. Add this to its config:
-
-```json
-{
-  "metrics": {
-    "append_dimensions": { "InstanceId": "${aws:InstanceId}" },
-    "metrics_collected": {
-      "ethtool": {
-        "interface_include": ["eth0", "eth1"],
-        "metrics_include": [
-          "pps_allowance_exceeded",
-          "bw_in_allowance_exceeded",
-          "bw_out_allowance_exceeded"
-        ]
-      }
-    }
-  }
-}
-```
-
-- natkit's `conntrack_allowance_exceeded` is the packets EC2 dropped since the last report because the allowance ran out. It should stay at 0. `conntrack_allowance_available` is how many more connections EC2 will track: alarm when it gets low.
-- The agent's `ethtool_pps_allowance_exceeded`, `ethtool_bw_in_allowance_exceeded` and `ethtool_bw_out_allowance_exceeded` are the driver's running counts of dropped packets. They should stay flat.
+natkit publishes EC2's allowance counters, and the module alarms when EC2 drops packets: see [Monitoring](/docs/operate/monitoring/#alarms).

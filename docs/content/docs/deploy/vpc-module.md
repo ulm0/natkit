@@ -1,11 +1,12 @@
 ---
 title: With the VPC module
 description: natkit's module next to terraform-aws-modules/vpc.
-weight: 55
+weight: 20
+aliases: [/docs/vpc-module/]
 icon: lan
 ---
 
-The community [VPC module](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws) makes the VPC, its subnets and route tables. Leave its NAT gateways off (`enable_nat_gateway = false`) and give natkit's [OpenTofu module](../opentofu/) its outputs:
+The community [VPC module](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws) makes the VPC, its subnets and route tables. Leave its NAT gateways off (`enable_nat_gateway = false`) and give natkit's [OpenTofu module](/docs/deploy/opentofu/) its outputs:
 
 | natkit's input | The VPC module's output |
 |---|---|
@@ -13,7 +14,7 @@ The community [VPC module](https://registry.terraform.io/modules/terraform-aws-m
 | `subnet_id` | one of `public_subnets` |
 | `route_table_ids` | `private_route_table_ids` |
 
-This is `examples/vpc` in the repository, which CI checks against the module. Outside the repository, `source` is `github.com/ulm0/natkit//tofu/nat?ref=v0.1.4`, and the AMI is the one you [imported](../getting-started/).
+This is `examples/vpc` in the repository, which CI checks against the module. Outside the repository, `source` is `github.com/ulm0/natkit//tofu/nat?ref=v0.1.4`, and the AMI is the one you [imported](/docs/start/getting-started/).
 
 The VPC module also takes over the VPC's default security group and leaves it without rules (`manage_default_security_group`): an instance launched with it can't send anything, through the NAT or otherwise. Give your instances a security group that allows their outbound traffic.
 
@@ -73,7 +74,7 @@ output "nat_public_ip" {
 
 ## One NAT per Availability Zone
 
-The VPC module makes one private route table per private subnet, in the order of `azs`, and puts the public subnets in the same order. For [one NAT per zone](../high-availability/#one-nat-per-availability-zone), each zone's NAT goes in that zone's public subnet and takes that zone's route table:
+The VPC module makes one private route table per private subnet, in the order of `azs`, and puts the public subnets in the same order. For [one NAT per zone](/docs/how-it-works/high-availability/#one-nat-per-availability-zone), each zone's NAT goes in that zone's public subnet and takes that zone's route table:
 
 ```hcl
 module "nat" {
@@ -88,4 +89,4 @@ module "nat" {
 }
 ```
 
-Each NAT is billed on its own: see [Costs](../costs/#one-nat-per-availability-zone).
+Each NAT is billed on its own: see [Costs](/docs/operate/costs/#one-nat-per-availability-zone).

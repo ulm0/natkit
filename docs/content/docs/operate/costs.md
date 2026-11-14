@@ -1,7 +1,8 @@
 ---
 title: Costs
 description: Everything a natkit deployment is billed for, and the same traffic through a NAT gateway.
-weight: 78
+weight: 30
+aliases: [/docs/costs/]
 icon: payments
 ---
 
@@ -11,7 +12,7 @@ The prices here are AWS's on-demand prices for US East (N. Virginia) in November
 
 ## A month
 
-One NAT from the [OpenTofu module](../opentofu/), before any traffic. The module's default instance type is `t4g.micro`; the other columns need `instance_type`.
+One NAT from the [OpenTofu module](/docs/deploy/opentofu/), before any traffic. The module's default instance type is `t4g.micro`; the other columns need `instance_type`.
 
 | | `t4g.micro` (default) | `t4g.nano` | `t3.nano` |
 |---|---|---|---|
@@ -108,13 +109,13 @@ natkit adds no charge per GB of its own. AWS's data transfer prices apply to its
 | To another AWS Region | $0.02 per GB to most Regions, $0.01 to US East (Ohio) |
 
 - A GB that a client in another zone uploads through the NAT costs $0.02 + $0.09. A GB that it downloads costs $0.02.
-- [NAT64](../nat64/) traffic leaves as IPv4 from the same public address, and is billed as IPv4 traffic.
+- [NAT64](/docs/how-it-works/nat64/) traffic leaves as IPv4 from the same public address, and is billed as IPv4 traffic.
 
 ## CloudWatch
 
 ### Allowance metrics and alarm
 
-With `conntrack_alarm_actions`, natkit publishes the [allowance counters](../cloudwatch/#allowance-metrics) and the module creates one alarm:
+With `conntrack_alarm_actions`, natkit publishes the [allowance counters](/docs/operate/monitoring/#allowance-metrics) and the module creates one alarm:
 
 | | Price | A month |
 |---|---|---|
@@ -130,16 +131,16 @@ With `conntrack_alarm_actions`, natkit publishes the [allowance counters](../clo
 
 ### The CloudWatch agent
 
-Every classic metric the [agent](../cloudwatch/#the-cloudwatch-agent) publishes is a custom metric: $0.30 a month each, plus its `PutMetricData` requests, about $0.44 a month at one request a minute. Each combination of metric name and dimensions is one metric.
+Every classic metric the [agent](/docs/operate/monitoring/#the-cloudwatch-agent) publishes is a custom metric: $0.30 a month each, plus its `PutMetricData` requests, about $0.44 a month at one request a minute. Each combination of metric name and dimensions is one metric.
 
-- The `ethtool` example in [Performance](../performance/#watch-the-limit) has 5 counters on 2 interfaces: 10 metrics, $3.00 a month.
+- The `ethtool` example in [Performance](/docs/operate/monitoring/#alarms) has 5 counters on 2 interfaces: 10 metrics, $3.00 a month.
 - With an `InstanceId` dimension, every replacement instance starts new metrics. They are billed by the hour, so the old ones stop costing when the old instance stops.
 - Logs, if the agent's config collects them, are billed per GB ingested and per GB stored.
 - The agent needs 1 GiB of memory, a micro instead of a nano: $3.07 a month more on T4g, $3.80 on T3.
 
 ## The AMI
 
-The AMIs aren't public: you [import the disk image](../getting-started/#get-the-ami) into your own account, and the snapshot behind the AMI is yours to pay.
+The AMIs aren't public: you [import the disk image](/docs/start/getting-started/#get-the-ami) into your own account, and the snapshot behind the AMI is yours to pay.
 
 - A snapshot is billed for the data it holds, not for the volume's size. natkit's holds about 0.1 GB: about half a cent a month for each AMI you keep, in each Region.
 - Deregistering an AMI doesn't delete its snapshot. To stop paying, delete the snapshot too.
@@ -148,13 +149,13 @@ The AMIs aren't public: you [import the disk image](../getting-started/#get-the-
 
 ## Replacements
 
-A new AMI or new settings [replace the instance](../opentofu/#updates). Two instances run side by side for two or three minutes. The second instance, its volume and its public IPv4 address are billed by the second: less than a tenth of a cent, plus the surplus CPU credits the old instance still owes.
+A new AMI or new settings [replace the instance](/docs/deploy/upgrading/). Two instances run side by side for two or three minutes. The second instance, its volume and its public IPv4 address are billed by the second: less than a tenth of a cent, plus the surplus CPU credits the old instance still owes.
 
-A replacement that [fails](../high-availability/#when-the-replacement-fails) is different. Each failed instance stays for 5 minutes before the group terminates it and launches the next, so a second instance is running most of the time until the configuration is fixed: about $0.32 a day on a `t4g.micro` for the instance, its volume and its address, plus the surplus credits each one spends booting.
+A replacement that [fails](/docs/how-it-works/high-availability/#when-the-replacement-fails) is different. Each failed instance stays for 5 minutes before the group terminates it and launches the next, so a second instance is running most of the time until the configuration is fixed: about $0.32 a day on a `t4g.micro` for the instance, its volume and its address, plus the surplus credits each one spends booting.
 
 ## One NAT per Availability Zone
 
-With [one NAT per zone](../high-availability/#one-nat-per-availability-zone), every fixed cost above is paid once per zone. Three zones cost 3 × $9.86 = $29.58 a month with the default `t4g.micro`, and 3 × $6.80 = $20.40 on `t4g.nano`.
+With [one NAT per zone](/docs/how-it-works/high-availability/#one-nat-per-availability-zone), every fixed cost above is paid once per zone. Three zones cost 3 × $9.86 = $29.58 a month with the default `t4g.micro`, and 3 × $6.80 = $20.40 on `t4g.nano`.
 
 With one NAT for all zones, the traffic of the clients in the other zones pays $0.02 per GB between zones, uploads and downloads alike. A second NAT for a zone costs less than that from 493 GB a month of that zone's traffic on a `t4g.micro`, and from 340 GB on a `t4g.nano`.
 
@@ -171,7 +172,7 @@ A NAT gateway costs $0.045 an hour ($32.85 a month), plus its public IPv4 addres
 - The NAT gateway's $0.045 per GB also applies to downloads and to traffic to AWS services in the same Region. Through natkit those cost nothing per GB.
 - natkit's columns leave out surplus CPU credits. 1 000 GB a month is about 3 Mbit/s on average.
 - A NAT gateway bills a partial hour as a full hour.
-- The price is not the only difference. See [Performance](../performance/) for a NAT instance's limits, and [High availability](../high-availability/) for what a replacement interrupts.
+- The price is not the only difference. See [Performance](/docs/operate/performance/) for a NAT instance's limits, and [High availability](/docs/how-it-works/high-availability/) for what a replacement interrupts.
 
 ## Free tiers and discounts
 
@@ -183,7 +184,7 @@ The figures above leave these out:
 
 ## Launched by hand
 
-A single instance [launched without the module](../getting-started/#launch) is billed for the same three things: the instance, its volume and its public IPv4 address.
+A single instance [launched without the module](/docs/deploy/by-hand/) is billed for the same three things: the instance, its volume and its public IPv4 address.
 
 - Without an EIP it uses the address it launched with, at the same price.
 - Stop it, and the instance charge stops and that address is released. The volume is still billed, and so is an EIP.
