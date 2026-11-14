@@ -17,7 +17,6 @@
 # NATKIT_TEST_PUBLIC_SUBNET, NATKIT_TEST_PRIVATE_SUBNET and NATKIT_TEST_INSTANCE_PROFILE (scripts/boot-test.sh).
 # One at a time, and not while a boot test runs: both route the private subnet.
 set -eu
-set -f # the -var arguments are split on spaces, never globbed
 cd "$(dirname "$0")/.."
 TAG=${NATKIT_MODULE_TEST_TAG:-$1}
 MAX=${NATKIT_HANDOVER_MAX:-30}
@@ -29,12 +28,8 @@ L=$(mktemp -d)
 
 tf() { "$TF" -chdir=test/module "$@" -input=false -no-color; }
 out() { "$TF" -chdir=test/module output -raw "$1"; }
-# apply <stage> [-var ...]: quiet unless it fails
-apply() {
-	s=$1
-	shift
-	tf apply -auto-approve "$@" >"$L/apply-$s.log" 2>&1 || { tail -n 30 "$L/apply-$s.log" >&2; die "apply ($s)"; }
-}
+# apply <stage>: with the TF_VAR_s exported so far; quiet unless it fails
+apply() { tf apply -auto-approve >"$L/apply-$1.log" 2>&1 || { tail -n 30 "$L/apply-$1.log" >&2; die "apply ($1)"; }; }
 ago() { t=$(($(date +%s) - $1)); date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ; }
 con() { aws ec2 get-console-output --instance-id "$1" --latest --query Output --output text 2>/dev/null | tr -d '\r'; }
 nats() {
@@ -44,7 +39,7 @@ nats() {
 cleanup() {
 	set +e
 	echo "== destroy" >&2
-	tf destroy -auto-approve $vars >"$L/destroy.log" 2>&1 || tf destroy -auto-approve $vars >"$L/destroy.log" 2>&1
+	tf destroy -auto-approve >"$L/destroy.log" 2>&1 || tf destroy -auto-approve >"$L/destroy.log" 2>&1
 	if grep -q 'Destroy complete' "$L/destroy.log"; then
 		aws s3 rm "s3://$NATKIT_BUCKET/$KEY" >/dev/null
 	else
@@ -108,7 +103,6 @@ refreshed() {
 	return 1
 }
 
-vars=''
 C=''
 trap cleanup EXIT
 tf init -backend-config="bucket=$NATKIT_BUCKET" -backend-config="key=$KEY" -backend-config="region=$AWS_REGION" >"$L/init.log" 2>&1 ||
@@ -130,8 +124,8 @@ cidr=$(aws ec2 describe-vpcs --vpc-ids "$vpc" --query 'Vpcs[0].CidrBlock' --outp
 
 echo "== 2. handover"
 s0=$(seqno)
-vars='-var keepalive=601'
-apply 2 $vars
+export TF_VAR_keepalive=601
+apply 2
 n2=$(ready "$n1") || die "the replacement isn't ready"
 echo "NAT $n2"
 refreshed || die "the instance refresh didn't finish"
@@ -155,8 +149,8 @@ echo "allowance available: $d, alarm: $a"
 
 echo "== 4. client_cidrs without the client, untracked"
 pub=$(aws ec2 describe-subnets --subnet-ids "$TF_VAR_public_subnet" --query 'Subnets[0].CidrBlock' --output text)
-vars="-var client_cidrs=[\"$pub\"] -var untracked=true"
-apply 4 $vars
+export TF_VAR_client_cidrs="[\"$pub\"]" TF_VAR_untracked=true
+apply 4
 n3=$(ready "$n2") || die "the replacement isn't ready"
 echo "NAT $n3"
 refreshed || die "the instance refresh didn't finish"
@@ -167,8 +161,9 @@ echo "$p" | tail -n 4
 [ "$(echo "$p" | grep -c ' none$')" -ge 6 ] && ! echo "$p" | grep -qv ' none$' || die "a client outside client_cidrs got through"
 
 echo "== 5. the default client_cidrs, untracked, tcp_established_timeout 350"
-vars='-var untracked=true -var tcp_established_timeout=350'
-apply 5 $vars
+unset TF_VAR_client_cidrs
+export TF_VAR_tcp_established_timeout=350
+apply 5
 n4=$(ready "$n3") || die "the replacement isn't ready"
 echo "NAT $n4"
 works "$(seqno)" || die "no egress"
