@@ -43,6 +43,7 @@ eip_id: eipalloc-0123                 # associate this EIP with the primary ENI 
 eni_id: eni-0123                      # HA: attach this static ENI (the route tables' target) as device 1,
                                       #   turn off the primary ENI's source/dest check
 interface: eth0                       # public interface, if not the primary ENI's (ignored with eni_id)
+client_cidrs: [10.0.0.0/16]           # only these sources may open connections through the NAT (default: any)
 nat64: false                          # no NAT64 (default: on)
 ip_local_port_range: "1024 65535"     # tuning, applied only when set
 nf_conntrack_max: 262144              # default: one flow per 8 kB of RAM (about 117 000 on 1 GiB)
@@ -77,11 +78,11 @@ ports 61001-65535 of the instance's address: keep `ip_local_port_range` below th
 
 ```hcl
 module "nat" {
-  source          = "github.com/ulm0/natkit//tofu/nat"
+  source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.2"
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-<version>-arm64
+  ami_id          = "ami-..." # natkit-v0.1.2-arm64: the same release as the module
   settings        = { nf_conntrack_max = "262144" }
 }
 ```
@@ -117,8 +118,8 @@ as running.
 - No SSH, SSM agent or package manager; the only login is the EC2 Serial Console, locked unless `console_password`
   is set.
 - The instance accepts no new inbound connections to itself (nftables input policy drop: replies, ICMP and DHCP
-  only). Forwarded traffic is not filtered (use the security group), except packets conntrack calls invalid, which
-  would otherwise leave un-NATed.
+  only). It forwards new connections only from `client_cidrs`, when set (the module always sets it), and drops
+  packets conntrack calls invalid, which would otherwise leave un-NATed.
 - AWS credentials reach `curl` on stdin, never on a command line.
 - Kernel: built from `allnoconfig` (no USB, wireless, filesystems beyond tmpfs/overlay, `/dev/mem`, kexec or 32-bit
   syscalls), CPU mitigations, KASLR, stack protector, hardened usercopy, zeroed allocations. Module loading is

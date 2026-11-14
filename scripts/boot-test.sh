@@ -2,8 +2,9 @@
 # Boot test of a natkit AMI in fck-nat's HA setup, end to end:
 #  1. an EIP and a static ENI (source/dest check off) are made; the private subnet's route table gets
 #     0.0.0.0/0 -> the ENI; an SSM parameter holds a CloudWatch agent config
-#  2. NAT instance A boots with user-data eip_id + eni_id + tuning + cwagent + nat64: false: its console line must
-#     say ready, private eth1, the EIP, nat64 off, cwagent on. (Without Jool: v0.1.0 only forwarded IPv4 with it on.)
+#  2. NAT instance A boots with user-data eip_id + eni_id + client_cidrs (the private subnet) + tuning + cwagent +
+#     nat64: false: its console line must say ready, private eth1, the EIP, nat64 off, cwagent on. (Without Jool:
+#     v0.1.0 only forwarded IPv4 with it on.)
 #  3. a client (Amazon Linux 2023, private subnet, no public IP) prints its egress IP on its console every 15 s:
 #     it must be the EIP
 #  4. failover: instance B boots with the same user-data but NAT64 (the default) while A holds the ENI; A is terminated; B must attach the
@@ -75,6 +76,9 @@ line() {
 # NAT64 needs IPv6 in both subnets
 v6=$(aws ec2 describe-subnets --subnet-ids "$PUB" "$PRIV" --query 'length(Subnets[?Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlock != null])' --output text)
 [ "$v6" = 2 ] && v6=1 || v6=''
+# client_cidrs: the private subnet's CIDRs, so the client is the one source natkit forwards for
+clients=$(aws ec2 describe-subnets --subnet-ids "$PRIV" --output text \
+	--query 'Subnets[0].[CidrBlock, Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlock]' | tr '\t' '\n' | grep -v '^None$' | sed 's/.*/"&"/' | paste -sd, -)
 [ -n "$v6" ] || echo "no IPv6 in the test subnets: NAT64 is only checked for 'nat64 on'" >&2
 
 # 1. EIP, static ENI, route, agent config
@@ -96,6 +100,7 @@ echo "EIP $eip ($eip_ip), ENI $eni, route table $rt" >&2
 cat >"$ud" <<EOF
 eip_id: $eip
 eni_id: $eni
+client_cidrs: [$clients]
 nf_conntrack_max: 131072
 ip_local_port_range: "1024 61000"
 cwagent_enabled: true

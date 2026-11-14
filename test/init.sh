@@ -36,6 +36,8 @@ run "" "natkit-init
 	nft list table ip natkit | grep -q 'oifname \"eth0\" masquerade'
 	nft list table inet natkit | grep -q 'hook input priority filter; policy drop;'
 	nft list table inet natkit | grep -q 'ct state invalid drop'
+	nft list chain inet natkit forward | grep -q 'hook forward priority filter; policy accept;'
+	if nft list chain inet natkit prerouting >/dev/null 2>&1; then exit 1; fi
 	[ \$(cat /proc/sys/net/ipv4/conf/eth0/send_redirects) = 0 ]
 	[ \$(cat /proc/sys/net/ipv4/ip_forward) = 1 ] && [ \$(cat /proc/sys/net/ipv6/conf/all/forwarding) = 1 ]
 	[ \$(cat /proc/sys/net/ipv4/conf/all/accept_redirects) = 0 ]
@@ -70,6 +72,22 @@ run 'interface: eth9' "ip link add eth9 type dummy
 	[ \"\$(cat /tmp/console)\" = 'natkit: ready, public eth9 private eth9, eip none, nat64 off, cwagent off' ]
 	nft list table ip natkit | grep -q 'oifname \"eth9\" masquerade'"
 
+echo "== client_cidrs: new connections only from the clients (overlaps merged), NAT64 only from IPv6 clients"
+run 'client_cidrs: [10.0.0.0/16, 10.0.1.0/24, "2600:1f18:aaaa:bb00::/56"]' "natkit-init
+	nft list chain inet natkit forward | grep -q 'hook forward priority filter; policy drop;'
+	nft list chain inet natkit forward | grep -q 'ct state established,related accept'
+	nft list chain inet natkit forward | grep -q 'ip saddr @clients4 accept'
+	nft list chain inet natkit forward | grep -q 'ip6 saddr @clients6 accept'
+	nft list set inet natkit clients4 | grep -q 'elements = { 10.0.0.0/16 }'
+	nft list set inet natkit clients6 | grep -q 'elements = { 2600:1f18:aaaa:bb00::/56 }'
+	nft list chain inet natkit prerouting | grep -q 'hook prerouting priority raw; policy accept;'
+	nft list chain inet natkit prerouting | grep -q 'ip6 daddr 64:ff9b::/96 ip6 saddr != @clients6 drop'"
+
+echo "== client_cidrs, IPv4 only: an empty IPv6 set, so no NAT64 for anyone"
+run 'client_cidrs: [192.168.0.0/24]' "natkit-init
+	nft list set inet natkit clients4 | grep -q 'elements = { 192.168.0.0/24 }'
+	if nft list set inet natkit clients6 | grep -q elements; then exit 1; fi"
+
 echo "== nat64: false is accepted (and off)"
 run 'nat64: false' "natkit-init | grep -q 'NAT64: off in user-data'"
 
@@ -83,6 +101,16 @@ fails 'cwagent_enabled: true
 cwagent_cfg_param_name: /natkit/test/notjson' "cwagent: /natkit/test/notjson is not a JSON object"
 fails 'console_password: /natkit/test/plain' "console_password: /natkit/test/plain is not a crypt hash"
 fails 'interface: eth7' "interface: no interface eth7"
+fails 'client_cidrs: 10.0.0.0/16' "user-data: client_cidrs: not a list of CIDRs"
+fails 'client_cidrs: []' "user-data: client_cidrs: not a list of CIDRs"
+fails 'client_cidrs: [10.0.0.0]' "user-data: client_cidrs: bad value '10.0.0.0'"
+fails 'client_cidrs: ["10.0.0.0/16; flush ruleset"]' "user-data: client_cidrs: bad value '10.0.0.0/16;'"
+fails 'client_cidrs: [999.0.0.0/8]' "user-data: client_cidrs: bad value '999.0.0.0/8'"
+fails 'client_cidrs: [010.0.0.0/8]' "user-data: client_cidrs: bad value '010.0.0.0/8'"
+fails 'client_cidrs: [10.0.0.0/33]' "user-data: client_cidrs: bad value '10.0.0.0/33'"
+fails 'client_cidrs: [""]' "user-data: client_cidrs: not a list of CIDRs"
+fails 'client_cidrs: ["2600:1f18::/129"]' "user-data: client_cidrs: bad value '2600:1f18::/129'"
+fails 'client_cidrs: ["2600:zz::/56"]' "user-data: client_cidrs: bad value '2600:zz::/56'"
 fails 'eip_id: eipalloc-0bad' "AssociateAddress eipalloc-0bad failed: natkit-init: AssociateAddress: HTTP 400 InvalidParameterValue: unexpected"
 fails '- a list' "user-data is not a YAML map"
 

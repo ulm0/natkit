@@ -32,7 +32,7 @@ locals {
 }
 
 module "nat" {
-  source   = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.1"
+  source   = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.2"
   for_each = local.azs
 
   name            = "nat-${each.key}"
