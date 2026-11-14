@@ -15,6 +15,6 @@ To use it:
 
 With [`client_cidrs`](../configuration/), only its IPv6 sources can use NAT64, and Jool's address-dependent filtering admits only replies from the IPv4 hosts a client contacted. Without it, Jool lets any IPv4 host reach a client's mapping.
 
-Jool's default IPv4 pool is ports 61001-65535 of the instance's address. Keep `ip_local_port_range` below that.
+Jool's default IPv4 pool is ports 61001-65535 of the instance's address. natkit's IPv4 masquerade uses ports 1024-61000, so the two never share one. Keep `ip_local_port_range` below 61001 too.
 
 The Jool modules are built against natkit's kernel (Jool 4.1.15).
