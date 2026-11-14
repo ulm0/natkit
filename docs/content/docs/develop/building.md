@@ -36,4 +36,6 @@ On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](/docs/depl
 - a client outside `client_cidrs` gets nothing through, with `untracked`;
 - `tcp_established_timeout` reaches both ENIs.
 
+Per-commit AMIs are deregistered after each run. A release keeps its own AMIs and deregisters those of lower releases, so only the latest release's stay.
+
 `tofu/ci` creates the CI role, test VPC and instance profile. Both roles reach only the test VPC, what a test tagged and the module test's group and alarm. See the [README](https://github.com/ulm0/natkit#ci) for the repository variables.
