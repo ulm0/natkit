@@ -47,14 +47,6 @@ module "nat" {
 | `console_password_param` | `null` | SSM parameter with root's crypt hash for the EC2 Serial Console |
 | `tags` | `{}` | extra tags |
 
-## Upgrading
-
-Use the module and the AMI of the same release. The module refuses an AMI older than the keys it sets: from v0.1.4 it sets `lifecycle_hook`, which natkit v0.1.3 and earlier don't know.
-
-- Upgrading the module replaces the instance once: its user-data changes.
-- The lifecycle hook is created along with that first replacement, so it may not hold it yet. It holds every one after.
-- With `instance_profile`, add the Auto Scaling actions of the [instance role](../instance-role/) to your role before you upgrade. Without them the new instance fails its setup, and the old one keeps routing.
-
 ## Outputs
 
 `eni_id`, `public_ip` (the EIP, with `eip = true`), `security_group_id` (the static ENI's), `public_security_group_id` (the instance's primary ENI's), `autoscaling_group_name`, `conntrack_alarm_name`, `role_name` (null with `instance_profile`).
@@ -70,8 +62,13 @@ The static ENI has to admit the clients: to EC2, a packet a client sends to the 
 
 ## Updates
 
-A new AMI, new user-data or a change to the primary ENI's security group replaces the instance through an instance refresh. The replacement launches first, sets itself up and then [takes the ENI over](../high-availability/): egress stops for the handover (14 seconds in a test), and the connections open at that moment are cut. The old instance is terminated 90 seconds after the new one is in service.
+A new AMI, new user-data or a change to the primary ENI's security group replaces the instance through an instance refresh. The replacement launches first, sets itself up and then [takes the ENI over](../high-availability/): egress stops for the handover (14 seconds in a test), and the connections open at that moment are cut. The group puts the new instance in service when natkit completes the [lifecycle hook](../high-availability/#when-the-replacement-fails), and terminates the old one 90 seconds later. A replacement that fails its setup is never put in service, and the old instance stays.
 
-Upgrade the module and the AMI together, from the same release. Since v0.1.2 the module always sets `client_cidrs`, which natkit v0.1.1 and earlier refuse as an unknown key: the replacement instance would never take the ENI. The module refuses an AMI named `natkit-v0.1.0-*` or `natkit-v0.1.1-*`. The upgrade also splits the one security group into two.
+Upgrade the module and the AMI together, from the same release. The module refuses an AMI that doesn't know the keys it sets: from v0.1.4 it sets `lifecycle_hook`, so it refuses the releases up to v0.1.3.
 
-An AMI older than v0.1.3 doesn't take the ENI over. Its replacement waits for the ENI until the old instance is terminated, so egress stops for longer.
+Upgrading to v0.1.4:
+
+- The instance is replaced once: its user-data changes.
+- The lifecycle hook is created along with that first replacement, so it may not hold it yet. It holds every one after.
+- With `instance_profile`, add the Auto Scaling actions of the [instance role](../instance-role/) to your role first. Without them the new instance fails its setup, and the old one keeps routing.
+- From v0.1.1 or earlier, the upgrade also splits the one security group into two.
