@@ -145,6 +145,7 @@ a=$(nat natkit-boot-test-a)
 sed -i.bak '$d' "$ud" && rm -f "$ud.bak" # B gets the default: NAT64 on
 echo "NAT A $a" >&2
 l=$(line "$a" 'natkit: ') || die "A: no natkit line on the console after 15 min"
+console "$a" | tr -d '\r' | grep -a -q '^Welcome to natkit' || die "A: the console doesn't greet with natkit's /etc/issue"
 echo "A: $l"
 wa=$(echo "$want" | sed 's/nat64 on/nat64 off/')
 [ "$l" = "$wa" ] || die "A: want '$wa'"
