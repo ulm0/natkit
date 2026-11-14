@@ -293,6 +293,16 @@ func TestInitLifecycleHook(t *testing.T) {
 	})
 }
 
+// regression: a parameter put from a file (aws ssm put-parameter --value file://hash) ends with a newline; the shell's
+// $(...) dropped it, and the shadow line must not carry it either
+func TestInitConsolePasswordNewline(t *testing.T) {
+	c := runInitWith(t, "console_password: /natkit/test/hash-nl", true, nil)
+	c.wantReady(t, "ready, public eth0 private eth0, eip none, nat64 off, cwagent off")
+	if got := c.h.file(runDir + "/getty.shadow"); got != "root:$6$salt$hash::0:99999:7:::\n" {
+		t.Errorf("getty.shadow %q", got)
+	}
+}
+
 func TestInitFailures(t *testing.T) {
 	t.Run("a setup that fails takes neither the ENI nor the EIP, and leaves the hook alone", func(t *testing.T) {
 		c := runInitWith(t, "eip_id: eipalloc-0123\neni_id: eni-0bbbbbbbbbbbbbbbb\nlifecycle_hook: natkit-ready\nconsole_password: /natkit/test/plain", true, nil)
@@ -366,6 +376,17 @@ func TestInitFailures(t *testing.T) {
 	t.Run("cwagent config that isn't a JSON object", func(t *testing.T) {
 		runInitWith(t, "cwagent_enabled: true\ncwagent_cfg_param_name: /natkit/test/notjson", true, nil).
 			wantFail(t, "cwagent: /natkit/test/notjson is not a JSON object")
+		runInitWith(t, "cwagent_enabled: true\ncwagent_cfg_param_name: /natkit/test/null", true, nil).
+			wantFail(t, "cwagent: /natkit/test/null is not a JSON object")
+	})
+	t.Run("a console_password hash that would break the shadow line", func(t *testing.T) {
+		for _, p := range []string{"/natkit/test/colon", "/natkit/test/two-lines"} {
+			c := runInitWith(t, "console_password: "+p, true, nil)
+			c.wantFail(t, "console_password: "+p+" is not a crypt hash (openssl passwd -6)")
+			if got := c.h.file(runDir + "/getty.shadow"); got != lockedRow {
+				t.Errorf("getty.shadow %q", got)
+			}
+		}
 	})
 	t.Run("an SSM parameter it can't read", func(t *testing.T) {
 		c := runInitWith(t, "console_password: /natkit/test/missing", true, nil)

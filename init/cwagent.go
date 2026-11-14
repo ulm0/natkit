@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -41,8 +43,8 @@ func cwagentLoop(h *host, c config, runs int) int {
 		if err == nil {
 			break
 		}
-		why := lastLine(out)
-		if why == "" {
+		why := lastLine(out) // ctr's error; its progress lines are stale after a timeout
+		if errors.Is(err, context.DeadlineExceeded) || why == "" {
 			why = "no answer in 5 min"
 		}
 		say("pull failed, retrying: " + why)

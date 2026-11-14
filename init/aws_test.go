@@ -427,6 +427,30 @@ func TestCredentialsLate(t *testing.T) {
 	}
 }
 
+// an instance without a role (no instance profile): said as such, not as the IMDS 404 behind it
+func TestNoInstanceRole(t *testing.T) {
+	s := newAWSServer(t)
+	s.credsLate = 1 << 30
+	cl, _ := s.cloud()
+	ctx := context.Background()
+	_, ssmErr := cl.parameter(ctx, "/natkit/x")
+	for _, tc := range []struct {
+		err    error
+		action string
+	}{
+		{cl.sourceDestCheckOff(ctx, testENI), "ModifyNetworkInterfaceAttribute"},
+		{ssmErr, "GetParameter"},
+		{cl.putMetrics(ctx, "nat-a", 0, 1), "PutMetricData"},
+	} {
+		if want := tc.action + ": no instance role credentials (an instance profile?): HTTP 404"; tc.err == nil || tc.err.Error() != want {
+			t.Errorf("%v, want %q", tc.err, want)
+		}
+	}
+	if n := len(s.reqs); n != 0 {
+		t.Errorf("%d requests sent unsigned", n)
+	}
+}
+
 // natkit-init end to end through the SDK, against the fake IMDS and EC2: the user-data, the metadata, a signed call
 func TestRunInitSDK(t *testing.T) {
 	s := newAWSServer(t)

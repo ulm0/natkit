@@ -107,11 +107,19 @@ type sdkCloud struct {
 // newCloud: the SDK's clients for the region, with the instance role's credentials (fetched through IMDS when first
 // needed, cached until they expire; one that can't be fetched yet is fetched again on the next call).
 func newCloud(c config, region string, md *imds.Client) *sdkCloud {
+	role := ec2rolecreds.New(func(o *ec2rolecreds.Options) { o.Client = md })
 	cfg := aws.Config{
-		Region:      region,
-		Credentials: aws.NewCredentialsCache(ec2rolecreds.New(func(o *ec2rolecreds.Options) { o.Client = md })),
-		Retryer:     func() aws.Retryer { return aws.NopRetryer{} },
-		AppID:       "natkit-" + version, // CloudTrail's userAgent says which natkit made the call
+		Region: region,
+		// what's missing, said once: the IMDS answer behind it (a 404) would otherwise read as EC2's or SSM's
+		Credentials: aws.NewCredentialsCache(aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+			c, err := role.Retrieve(ctx)
+			if err != nil {
+				return c, fmt.Errorf("no instance role credentials (an instance profile?): %s", short(err))
+			}
+			return c, nil
+		})),
+		Retryer: func() aws.Retryer { return aws.NopRetryer{} },
+		AppID:   "natkit-" + version, // CloudTrail's userAgent says which natkit made the call
 	}
 	ep := func(u string) *string {
 		if u == "" {

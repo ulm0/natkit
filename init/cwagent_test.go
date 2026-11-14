@@ -28,7 +28,7 @@ func TestCwagent(t *testing.T) {
 				case 1:
 					return "resolving...\nfailed to resolve reference: dial tcp: i/o timeout\n", errors.New("exit status 1")
 				case 2:
-					return "", context.DeadlineExceeded // no answer in 5 min
+					return "resolving...\nelapsed: 299.9s\n", context.DeadlineExceeded // no answer in 5 min: its progress is stale
 				}
 			case args[2] == "run":
 				return "agent starting\nline 2\nfatal: bad config\n", nil

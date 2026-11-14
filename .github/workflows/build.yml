@@ -149,7 +149,7 @@ jobs:
           docker push "$REGISTRY/init:${{ github.sha }}-${{ matrix.arch }}"
 
   init-manifest:
-    needs: image
+    needs: [image, go] # init:latest and init:<tag> only once the Go code's checks passed too
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5

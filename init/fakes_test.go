@@ -102,6 +102,8 @@ func newFakeCloud(md *fakeMetadata) *fakeCloud {
 		params: map[string]string{
 			"/natkit/test/root-hash": "$6$salt$hash", "/natkit/test/plain": "hunter2",
 			"/natkit/test/cw": `{"metrics": {"namespace": "natkit"}}`, "/natkit/test/notjson": "[1, 2]",
+			"/natkit/test/null": "null", "/natkit/test/hash-nl": "$6$salt$hash\n", "/natkit/test/colon": "$6$salt$ha:sh",
+			"/natkit/test/two-lines": "$6$salt$hash\nroot::0:0:::::",
 		},
 	}
 }

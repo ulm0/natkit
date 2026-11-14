@@ -393,7 +393,7 @@ func (r *initRun) setupCwagent() {
 		r.die("cwagent: %v", err)
 	}
 	var obj map[string]any
-	if json.Unmarshal([]byte(v), &obj) != nil {
+	if json.Unmarshal([]byte(v), &obj) != nil || obj == nil { // null too
 		r.die("cwagent: %s is not a JSON object", p)
 	}
 	r.cwagent = "on"
@@ -406,8 +406,10 @@ func (r *initRun) setupConsolePassword() {
 	if p == "" {
 		return
 	}
-	hash := r.ssm(p, "console_password")
-	if !strings.HasPrefix(hash, "$") {
+	// a parameter written from a file ends with its newline: the shell's $(...) dropped it. One inside, or a ':', would
+	// break the shadow line.
+	hash := strings.TrimRight(r.ssm(p, "console_password"), "\n")
+	if !strings.HasPrefix(hash, "$") || strings.ContainsAny(hash, ":\n") {
 		r.die("console_password: %s is not a crypt hash (openssl passwd -6)", p)
 	}
 	if err := r.h.write(runDir+"/getty.shadow", "root:"+hash+"::0:99999:7:::\n", 0o600); err != nil {

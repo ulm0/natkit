@@ -40,7 +40,12 @@ func TestUserDataRefused(t *testing.T) {
 		{"tcp_max_syn_backlog: 1e3", "user-data: tcp_max_syn_backlog: bad value '1e3'"},
 		{"cwagent_enabled: yes", "user-data: cwagent_enabled: bad value 'yes'"},
 		{"cwagent_enabled: True", "user-data: cwagent_enabled: bad value 'True'"},
-		{`nat64: "false"`, "user-data: nat64: bad value 'false'"},
+		{"nat64: False", "user-data: nat64: bad value 'False'"}, // the shell's yq == took only true and false
+		{"nat64: TRUE", "user-data: nat64: bad value 'TRUE'"},
+		// regression: yq read every document, so settings after a '---' were lost without a word
+		{"eip_id: eipalloc-0123\n---\nnat64: false", "user-data: more than one YAML document"},
+		{"eip_id: eipalloc-0123\n---\n- x", "user-data: more than one YAML document"},
+		{"eip_id: eipalloc-0123\n---\n:", "user-data: more than one YAML document"},
 		{"nat64: [1]", "user-data: nat64: bad value '[1]'"},
 		{"console_password: /natkit/a b", "user-data: console_password: bad value '/natkit/a b'"},
 		{"cwagent_cfg_param_name: /natkit/$x", "user-data: cwagent_cfg_param_name: bad value '/natkit/$x'"},
@@ -107,7 +112,18 @@ lifecycle_hook: natkit-ready
 		{"", func(u *userData) bool { return u.nat64 && !u.clients && u.eniID == "" }},
 		{"{}", func(u *userData) bool { return u.nat64 }},
 		{"nat64: true", func(u *userData) bool { return u.nat64 }},
-		{"nat64: False", func(u *userData) bool { return !u.nat64 }},
+		{`nat64: "false"`, func(u *userData) bool { return !u.nat64 }}, // quoted, as the shell took it
+		{"nat64: 'true'", func(u *userData) bool { return u.nat64 }},
+		// one document, with its markers, or an empty one after it
+		{"eip_id: eipalloc-0123\n---\n", func(u *userData) bool { return u.eipID == "eipalloc-0123" }},
+		{"---\neip_id: eipalloc-0123\n...\n", func(u *userData) bool { return u.eipID == "eipalloc-0123" }},
+		{"eip_id: eipalloc-0123\n---\n# nothing\n", func(u *userData) bool { return u.eipID == "eipalloc-0123" }},
+		// block scalars lose their trailing newlines, as $(...) dropped them
+		{"metrics: |\n  nat-a\n", func(u *userData) bool { return u.metrics == "nat-a" }},
+		{"eip_id: |+\n  eipalloc-0123\n\n", func(u *userData) bool { return u.eipID == "eipalloc-0123" }},
+		{"nf_conntrack_max: >\n  262144\n", func(u *userData) bool { return u.conntrackMax == "262144" }},
+		// an empty list entry is skipped, like a blank one
+		{"client_cidrs:\n  - 10.0.0.0/16\n  -\n", func(u *userData) bool { return len(u.clients4) == 1 && u.clients4[0] == "10.0.0.0/16" }},
 		{"nat64: null", func(u *userData) bool { return u.nat64 }},
 		{"cwagent_enabled: false", func(u *userData) bool { return !u.cwagentEnabled }},
 		{"metrics: false", func(u *userData) bool { return u.metrics == "" }}, // the shell's // "" read false as unset
@@ -139,6 +155,7 @@ func FuzzUserData(f *testing.F) {
 		"", "{}", "eip_id: eipalloc-0123", "client_cidrs: [10.0.0.0/16, '2600::/56']", "nat64: false",
 		"client_cidrs: ['10.0.0.0/16; flush ruleset']", "- a", "a: [", "interface: eth0", "metrics: nat-a",
 		"x: &a 1\nmetrics: *a", "client_cidrs: *b", "nf_conntrack_max: 0800000",
+		"a: 1\n---\nb: 2", "metrics: |\n  nat-a\n", "client_cidrs:\n  -\n",
 	} {
 		f.Add(s)
 	}

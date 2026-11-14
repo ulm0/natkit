@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"strings"
@@ -72,9 +74,15 @@ var (
 func parseUserData(b []byte) (*userData, error) {
 	m := map[string]*yaml.Node{}
 	if len(b) > 0 { // none at all is a plain NAT; anything else must be a map, even a comment alone
+		dec := yaml.NewDecoder(bytes.NewReader(b))
 		var doc yaml.Node
-		if err := yaml.Unmarshal(b, &doc); err != nil || len(doc.Content) != 1 || resolve(doc.Content[0]).Kind != yaml.MappingNode {
+		if err := dec.Decode(&doc); err != nil || len(doc.Content) != 1 || resolve(doc.Content[0]).Kind != yaml.MappingNode {
 			return nil, errors.New("user-data is not a YAML map")
+		}
+		// a second document would be settings natkit never reads: a NAT set up without them
+		var more yaml.Node
+		if err := dec.Decode(&more); err != io.EOF && !(err == nil && (len(more.Content) == 0 || isNull(more.Content[0]))) {
+			return nil, errors.New("user-data: more than one YAML document")
 		}
 		root := resolve(doc.Content[0])
 		for i := 0; i+1 < len(root.Content); i += 2 {
@@ -115,10 +123,10 @@ func parseUserData(b []byte) (*userData, error) {
 	// value() reads false as unset: nat64 is the one key where false means something
 	if n := m["nat64"]; n != nil && !isNull(n) {
 		n = resolve(n)
-		if n.Kind != yaml.ScalarNode || n.Tag != "!!bool" {
+		if n.Kind != yaml.ScalarNode || (n.Value != "true" && n.Value != "false") {
 			return nil, fmt.Errorf("user-data: nat64: bad value '%s'", text(n))
 		}
-		u.nat64 = !strings.EqualFold(n.Value, "false")
+		u.nat64 = n.Value == "true"
 	}
 	u.cwagentParam = check("cwagent_cfg_param_name", reParam)
 	u.consolePassword = check("console_password", reParam)
@@ -167,8 +175,9 @@ func isNull(n *yaml.Node) bool {
 	return n.Kind == yaml.ScalarNode && n.Tag == "!!null"
 }
 
-// value: a key's value as text, the way the shell's yq '.[k] // "" | tostring' had it: unset, null and false are
-// "", a scalar its text as written (0800000 stays 0800000), anything else its YAML.
+// value: a key's value as text, the way the shell's $(yq '.[k] // "" | tostring') had it: unset, null and false
+// are "", a scalar its text as written (0800000 stays 0800000) without trailing newlines (a | or > block's), anything
+// else its YAML.
 func value(n *yaml.Node) string {
 	if n == nil {
 		return ""
@@ -178,18 +187,15 @@ func value(n *yaml.Node) string {
 		if n.Tag == "!!null" || (n.Tag == "!!bool" && strings.EqualFold(n.Value, "false")) {
 			return ""
 		}
-		return n.Value
+		return strings.TrimRight(n.Value, "\n")
 	}
 	return text(n)
 }
 
-// element: a list entry as text, null included (yq's tostring)
+// element: a list entry as text, as written (yq's tostring): an empty entry is "", skipped like a blank one
 func element(n *yaml.Node) string {
 	n = resolve(n)
 	if n.Kind == yaml.ScalarNode {
-		if n.Tag == "!!null" {
-			return "null"
-		}
 		return n.Value
 	}
 	return text(n)
