@@ -422,30 +422,25 @@ if [ -n "$eni_id" ]; then
 		# instance's shutdown or this one's boot. Without the permissions to, wait for the ENI as fck-nat does;
 		# fck-nat waits forever, natkit gives up after 15 min so the console (getty) shows the failure.
 		attq='.DescribeNetworkInterfacesResponse.networkInterfaceSet.item.attachment.attachmentId // ""'
-		if [ -n "$hook_group" ]; then
-			# Held by the lifecycle hook, waiting is no use: the group doesn't terminate the old instance before this
-			# one is in service. Retried as the other calls (throttling, or a detach still in progress), then a failure.
-			i=0
-			while :; do
-				att=$(ec2 DescribeNetworkInterfaces "NetworkInterfaceId.1=$eni_id" 2>"$RUN/retry.err" | yq -p xml "$attq") || att=''
-				if [ ! -s "$RUN/retry.err" ]; then
-					[ -n "$att" ] || break
-					log "taking $eni_id over from its instance ($att)"
-					ec2 DetachNetworkInterface "AttachmentId=$att" Force=true >/dev/null 2>"$RUN/retry.err" && break
-				fi
-				i=$((i + 1))
-				[ "$i" -lt 10 ] || die "$eni_id: can't take it over, and its instance stays until this one is in service (lifecycle_hook): $(tr '\n' ' ' <"$RUN/retry.err")"
-				sleep 3
-			done
-		else
+		# The lookup and the detach are tried 10 times, as the other calls: throttling, a request that times out, a
+		# detach still in progress. Then, held by the lifecycle hook, a failure: waiting is no use, the group doesn't
+		# terminate the old instance before this one is in service. Without the hook, wait for the ENI.
+		i=0
+		while :; do
 			att=$(ec2 DescribeNetworkInterfaces "NetworkInterfaceId.1=$eni_id" 2>"$RUN/retry.err" | yq -p xml "$attq") || att=''
-			if [ -n "$att" ]; then
+			if [ ! -s "$RUN/retry.err" ]; then
+				[ -n "$att" ] || break
 				log "taking $eni_id over from its instance ($att)"
-				ec2 DetachNetworkInterface "AttachmentId=$att" Force=true >/dev/null || log "can't detach $att: waiting for it"
-			elif [ -s "$RUN/retry.err" ]; then
-				log "can't look up $eni_id's attachment: waiting for it"
+				ec2 DetachNetworkInterface "AttachmentId=$att" Force=true >/dev/null 2>"$RUN/retry.err" && break
 			fi
-		fi
+			i=$((i + 1))
+			if [ "$i" -ge 10 ]; then
+				[ -z "$hook_group" ] || die "$eni_id: can't take it over, and its instance stays until this one is in service (lifecycle_hook): $(tr '\n' ' ' <"$RUN/retry.err")"
+				log "can't take $eni_id over, waiting for it: $(tr '\n' ' ' <"$RUN/retry.err")"
+				break
+			fi
+			sleep 3
+		done
 		log "attaching $eni_id"
 		i=0
 		until ec2 AttachNetworkInterface "InstanceId=$iid" "NetworkInterfaceId=$eni_id" DeviceIndex=1 >/dev/null 2>"$RUN/retry.err"; do
