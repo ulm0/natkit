@@ -11,7 +11,7 @@
 terraform {
   required_version = ">= 1.6"
   required_providers {
-    aws = { source = "hashicorp/aws", version = ">= 6.0" }
+    aws = { source = "hashicorp/aws", version = ">= 6.68" } # connection_tracking_specification on aws_network_interface
   }
 }
 
