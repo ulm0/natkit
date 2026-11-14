@@ -15,27 +15,29 @@ terraform {
   }
 }
 
-variable "name" {
-  type    = string
-  default = "natkit"
-}
 variable "vpc_id" {
-  type = string
+  description = "The VPC."
+  type        = string
 }
 variable "subnet_id" {
   description = "Public subnet (internet gateway route) for the instance and its static ENI."
   type        = string
 }
 variable "route_table_ids" {
-  description = "Private route tables that get 0.0.0.0/0 (and 64:ff9b::/96 with nat64) -> the static ENI."
+  description = "Private route tables that get `0.0.0.0/0` (and `64:ff9b::/96` with `nat64`) to the static ENI."
   type        = list(string)
 }
 variable "ami_id" {
-  description = "A natkit AMI of the instance type's architecture."
+  description = "A natkit AMI of the instance type's architecture, from the same release as the module."
   type        = string
 }
+variable "name" {
+  description = "Name and `natkit` tag of every resource; with `conntrack_alarm_actions`, the `Name` dimension of the metrics."
+  type        = string
+  default     = "natkit"
+}
 variable "instance_type" {
-  description = "0.5 GiB of memory is enough (t4g.nano, t3.nano); the CloudWatch agent (cwagent_cfg_param_name) needs 1 GiB."
+  description = "0.5 GiB of memory is enough (`t4g.nano`, `t3.nano`); the CloudWatch agent (`cwagent_cfg_param_name`) needs 1 GiB, and the module refuses a `*.nano` with it. See [instance size](https://natkit.ulm0.com/docs/getting-started/#instance-size)."
   type        = string
   default     = "t4g.micro"
 }
@@ -45,17 +47,17 @@ variable "eip" {
   default     = true
 }
 variable "nat64" {
-  description = "Route 64:ff9b::/96 to the ENI and give it an IPv6 address (the subnet needs an IPv6 CIDR). Pair with Route 53 Resolver DNS64."
+  description = "Route `64:ff9b::/96` to the ENI and give it an IPv6 address (the subnet needs an IPv6 CIDR). Pair with Route 53 Resolver DNS64: see [NAT64](https://natkit.ulm0.com/docs/nat64/)."
   type        = bool
   default     = false
 }
 variable "ipv6_cidr" {
-  description = "The VPC's IPv6 CIDR, a default client with nat64."
+  description = "The VPC's IPv6 CIDR, a default client with `nat64`."
   type        = string
   default     = null
 }
 variable "client_cidrs" {
-  description = "Sources that may route through the NAT, IPv4 and IPv6. Enforced by the static ENI's security group (unless untracked) and by natkit's nftables. Default: the VPC's IPv4 CIDRs, plus ipv6_cidr."
+  description = "Sources that may route through the NAT, IPv4 and IPv6, in canonical form. Enforced by the static ENI's security group (unless `untracked`) and by natkit's nftables ([`client_cidrs`](https://natkit.ulm0.com/docs/configuration/)). Default: the VPC's IPv4 CIDRs, plus `ipv6_cidr`."
   type        = list(string)
   default     = null
   validation {
@@ -64,12 +66,12 @@ variable "client_cidrs" {
   }
 }
 variable "untracked" {
-  description = "Open the static ENI's security group to all traffic, so EC2 doesn't track the flows through it: about twice the connections before EC2's per-instance allowance runs out. client_cidrs is then enforced by natkit's nftables only."
+  description = "Open the static ENI's security group to all traffic, so EC2 doesn't track the flows through it: about twice the connections before EC2's per-instance allowance runs out. `client_cidrs` is then enforced by natkit's nftables only. See [Performance](https://natkit.ulm0.com/docs/performance/)."
   type        = bool
   default     = false
 }
 variable "tcp_established_timeout" {
-  description = "EC2's idle timeout, in seconds (60-432000), for established TCP connections it tracks on both ENIs. Default: EC2's (432000, or 350 on Nitro v6 instances). 350 matches NAT Gateway and frees the allowance from abandoned connections sooner. Going back to null leaves the static ENI at its last value: set EC2's default explicitly instead."
+  description = "EC2's idle timeout, in seconds (60 to 432000), for established TCP connections it tracks on both ENIs. Default: EC2's (432000, or 350 on Nitro v6 instances). 350 matches NAT Gateway and frees the allowance from abandoned connections sooner. Going back to `null` leaves the static ENI at its last value: set EC2's default explicitly instead. See [Performance](https://natkit.ulm0.com/docs/performance/)."
   type        = number
   default     = null
   validation {
@@ -78,7 +80,7 @@ variable "tcp_established_timeout" {
   }
 }
 variable "settings" {
-  description = "natkit's tuning keys for the user-data: ip_local_port_range, nf_conntrack_max, nf_conntrack_buckets, nf_conntrack_tcp_timeout_established, tcp_keepalive_time, tcp_max_syn_backlog."
+  description = "natkit's tuning [user-data keys](https://natkit.ulm0.com/docs/configuration/): `ip_local_port_range`, `nf_conntrack_max`, `nf_conntrack_buckets`, `nf_conntrack_tcp_timeout_established`, `tcp_keepalive_time`, `tcp_max_syn_backlog`. Any other key is refused at plan time."
   type        = map(any)
   default     = {}
   nullable    = false
@@ -92,28 +94,29 @@ variable "settings" {
   }
 }
 variable "cwagent_cfg_param_name" {
-  description = "SSM parameter with a CloudWatch agent JSON config: enables the agent. Needs 1 GiB of memory: a micro or larger."
+  description = "SSM parameter with a [CloudWatch agent](https://natkit.ulm0.com/docs/cloudwatch/) JSON config: enables the agent. Needs 1 GiB of memory: a micro or larger."
   type        = string
   default     = null
 }
 variable "conntrack_alarm_actions" {
-  description = "Alarm when EC2 drops packets because the instance's connection-tracking allowance ran out, and when the NAT stops reporting, with these actions (SNS topic ARNs; [] for an alarm without any). natkit publishes the ENA driver's allowance counters itself (user-data metrics), without the CloudWatch agent. CloudWatch bills the two metrics, the requests and the alarm."
+  description = "Alarm when EC2 drops packets because the instance's [connection-tracking allowance](https://natkit.ulm0.com/docs/performance/) ran out, and when the NAT stops reporting, with these actions (SNS topic ARNs; `[]` for an alarm without any). natkit publishes the ENA driver's allowance counters itself ([`metrics`](https://natkit.ulm0.com/docs/cloudwatch/#allowance-metrics)), without the CloudWatch agent. CloudWatch bills the two metrics, the requests and the alarm: see [Costs](https://natkit.ulm0.com/docs/costs/)."
   type        = list(string)
   default     = null
 }
 variable "instance_profile" {
-  description = "Name of an existing instance profile to use instead of creating a role: for accounts where IAM is managed elsewhere. Its role needs what this module's would have (see aws_iam_role_policy.this)."
+  description = "Name of an existing instance profile to use instead of the module's role, where IAM is managed elsewhere. Its role needs the [instance role](https://natkit.ulm0.com/docs/instance-role/)'s permissions."
   type        = string
   default     = null
 }
 variable "console_password_param" {
-  description = "SSM parameter with root's crypt hash (openssl passwd -6) for the EC2 Serial Console."
+  description = "SSM parameter with root's crypt hash (`openssl passwd -6`) for the EC2 Serial Console."
   type        = string
   default     = null
 }
 variable "tags" {
-  type    = map(string)
-  default = {}
+  description = "Extra tags for every resource."
+  type        = map(string)
+  default     = {}
 }
 
 data "aws_vpc" "this" {
@@ -452,10 +455,11 @@ resource "aws_cloudwatch_metric_alarm" "conntrack" {
 }
 
 output "eni_id" {
-  value = aws_network_interface.static.id
+  description = "The static ENI: the private route tables' target."
+  value       = aws_network_interface.static.id
 }
 output "public_ip" {
-  description = "The EIP, if eip = true."
+  description = "The EIP, with `eip = true`."
   value       = var.eip ? aws_eip.this[0].public_ip : null
 }
 output "security_group_id" {
@@ -467,13 +471,14 @@ output "public_security_group_id" {
   value       = aws_security_group.public.id
 }
 output "autoscaling_group_name" {
-  value = aws_autoscaling_group.this.name
+  description = "The Auto Scaling group of one."
+  value       = aws_autoscaling_group.this.name
 }
 output "conntrack_alarm_name" {
-  description = "With conntrack_alarm_actions."
+  description = "The alarm, with `conntrack_alarm_actions`."
   value       = one(aws_cloudwatch_metric_alarm.conntrack[*].alarm_name)
 }
 output "role_name" {
-  description = "The instance role this module created; null with instance_profile."
+  description = "The instance role this module created; null with `instance_profile`."
   value       = one(aws_iam_role.this[*].name)
 }

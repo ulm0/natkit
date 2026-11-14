@@ -1,0 +1,12 @@
+# terraform-docs examples/vpc: this example, as it is, on the docs page "With the VPC module". CI validates the
+# example and fails when the page is out of date.
+formatter: markdown
+content: |-
+  ```hcl
+  {{ include "main.tf" }}
+  ```
+output:
+  file: ../../docs/content/docs/vpc-module.md
+  mode: inject
+settings:
+  lockfile: false
