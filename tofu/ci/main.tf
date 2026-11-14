@@ -1,9 +1,11 @@
 # What natkit's CI (.github/workflows/build.yml) needs in AWS: a GitHub OIDC role for the AMI import, the boot test
 # and the module test, a small test VPC (IPv4 + IPv6: a public subnet, a private subnet with its own empty route table), and the
 # NAT instances' test profile. `tofu output repo_variables` lists the repository variables to set.
-# Both roles reach only the test VPC, what a test tagged and the module test's group and alarm (by name): the account
+# Both roles change only the test VPC, what a test tagged and the module test's group and alarm (by name): the account
 # may hold other things (a production NAT, other VPCs), and a test script with a bug, or a tool in the job that was
-# tampered with, must not get to them.
+# tampered with, must not get to them. The exceptions: the bucket's import/ and module-test/ prefixes, the
+# /natkit/boot-test/* parameters, any imported or copied snapshot (TagSnapshot), and PutMetricData in the natkit
+# namespace, which production NATs use too: keep those in another account.
 # Not created here: the account's GitHub OIDC provider, the S3 import bucket and the vmimport role (reuse yagan's).
 terraform {
   required_version = ">= 1.10"

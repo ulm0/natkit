@@ -7,7 +7,7 @@ aliases: [/docs/high-availability/]
 
 For HA, run natkit in an Auto Scaling group of one, with `eni_id` and `eip_id` in its user-data:
 
-- **Static ENI (`eni_id`):** the private route tables point at this ENI, not at an instance. The instance attaches it as device 1.
+- **Static ENI (`eni_id`):** the private route tables point at this ENI, not at an instance. The instance attaches it as device 1. Create it with source/dest check off: natkit turns off only the primary ENI's.
 - **EIP (`eip_id`):** the instance associates it with its primary ENI, so egress keeps the same public IP across replacements.
 
 When an instance is replaced:
@@ -16,7 +16,7 @@ When an instance is replaced:
 2. It takes the ENI. If another instance holds it, natkit detaches it from that one (a forced detach) and attaches it.
 3. Once it has the ENI, it tells its group that it is in service ([`lifecycle_hook`](#when-the-replacement-fails)) and takes the EIP.
 
-The takeover needs `ec2:DescribeNetworkInterfaces` and `ec2:DetachNetworkInterface` in the [instance role](/docs/reference/instance-role/). Without them the new instance retries the attachment until the old one lets go, for up to 15 minutes, as fck-nat does.
+The takeover needs `ec2:DescribeNetworkInterfaces` and `ec2:DetachNetworkInterface` in the [instance role](/docs/reference/instance-role/). Without them, and without [`lifecycle_hook`](#when-the-replacement-fails), the new instance retries the attachment until the old one lets go, for up to 15 minutes, as fck-nat does. Held by the hook, it fails its setup instead, and the old instance stays.
 
 fck-nat takes the EIP first. That moves egress off the EIP while the old instance is still routing. natkit takes the ENI first to avoid that gap.
 
