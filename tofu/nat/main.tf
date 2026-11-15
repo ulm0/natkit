@@ -6,7 +6,7 @@
 #     vpc_id          = aws_vpc.main.id
 #     subnet_id       = aws_subnet.public.id
 #     route_table_ids = [aws_route_table.private.id]
-#     ami_id          = "ami-..." # natkit-<version>-arm64
+#     ami_id          = "ami-..." # natkit-<version>-arm64: public in us-east-1, owner 208689161537
 #   }
 terraform {
   required_version = ">= 1.6"

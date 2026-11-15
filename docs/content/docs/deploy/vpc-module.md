@@ -13,7 +13,7 @@ The community [VPC module](https://registry.terraform.io/modules/terraform-aws-m
 | `subnet_id` | one of `public_subnets` |
 | `route_table_ids` | `private_route_table_ids` |
 
-This is `examples/vpc` in the repository, which CI checks against the module. Outside the repository, `source` is `github.com/ulm0/natkit//tofu/nat?ref=v0.1.5`, and the AMI is the one you [imported](/docs/start/getting-started/).
+This is `examples/vpc` in the repository, which CI checks against the module. Outside the repository, `source` is `github.com/ulm0/natkit//tofu/nat?ref=v0.1.5`, and the AMI is natkit's [public one](/docs/start/getting-started/#get-the-ami) in us-east-1, or the one you imported elsewhere (`owners = ["self"]`).
 
 The VPC module also takes over the VPC's default security group and leaves it without rules (`manage_default_security_group`): an instance launched with it can't send anything, through the NAT or otherwise. Give your instances a security group that allows their outbound traffic.
 
@@ -46,9 +46,10 @@ module "vpc" {
   enable_nat_gateway = false # natkit instead
 }
 
-# natkit's AMI, imported into this account (Getting started), from the same release as the module
+# natkit's public AMI (us-east-1), from the same release as the module. Always by owner: anyone can register an AMI
+# with this name. In another Region, the one you imported: owners = ["self"]
 data "aws_ami" "natkit" {
-  owners = ["self"]
+  owners = ["208689161537"]
   filter {
     name   = "name"
     values = ["natkit-v0.1.5-arm64"]

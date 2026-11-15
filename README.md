@@ -19,8 +19,18 @@ Docs: [natkit.ulm0.com](https://natkit.ulm0.com).
 
 ## Usage
 
-The AMIs aren't public. Import a [release](https://github.com/ulm0/natkit/releases)'s disk image into your own
-account and region (or [build it](#building)):
+The AMIs are public in us-east-1, owned by account `208689161537`, named `natkit-<version>-arm64` and
+`natkit-<version>-amd64`; each [release](https://github.com/ulm0/natkit/releases) lists their IDs. Look them up by
+owner, never by name alone (anyone can register an AMI with the same name):
+
+```sh
+aws ec2 describe-images --region us-east-1 --owners 208689161537 --filters Name=name,Values=natkit-v0.1.5-arm64 \
+  --query 'Images[0].ImageId' --output text
+```
+
+The three latest releases' AMIs stay up; older ones are deregistered (see
+[Upgrading](https://natkit.ulm0.com/docs/deploy/upgrading/)). In any other Region, or to keep an AMI for good, import
+the release's disk image into your own account (or [build it](#building)):
 
 ```sh
 V=v0.1.5 ARCH=arm64 # or amd64
@@ -92,7 +102,7 @@ module "nat" {
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-v0.1.5-arm64: the same release as the module
+  ami_id          = "ami-..." # natkit-v0.1.5-arm64 (public in us-east-1, owner 208689161537): the same release as the module
   settings        = { nf_conntrack_max = "262144" }
 }
 ```
@@ -175,7 +185,7 @@ instead: it holds the account ID, and the run logs are public):
 
 | Variable | |
 |---|---|
-| `AWS_ROLE_ARN` (secret) | GitHub OIDC role, assumable only from `main` and `v*` tags. It imports and registers AMIs and deletes the ones it tagged `natkit.io/release` (per-commit AMIs are pruned after each run, and a release's AMIs once a higher release is out). For the tests it creates instances, EIPs, ENIs, security groups and a launch template with a test's tag, and an Auto Scaling group and an alarm named `natkit-module-test-*`; it changes or deletes only those, what carries a test's tag or is in the test VPC. Beyond those, it writes under `import/` and `module-test/` in the bucket and the `/natkit/boot-test/*` parameters, and can tag any imported or copied snapshot in the account for release. `iam:PassRole` for the test profile and the `vmimport` role only |
+| `AWS_ROLE_ARN` (secret) | GitHub OIDC role, assumable only from `main` and `v*` tags. It imports and registers AMIs, makes a release's AMIs (tagged `natkit.io/release=natkit-v*`) public, turning the account's block public access for AMIs off for that and back on, and deletes the AMIs it tagged `natkit.io/release` (per-commit AMIs after each run, a release's once three newer releases are out). For the tests it creates instances, EIPs, ENIs, security groups and a launch template with a test's tag, and an Auto Scaling group and an alarm named `natkit-module-test-*`; it changes or deletes only those, what carries a test's tag or is in the test VPC. Beyond those, it writes under `import/` and `module-test/` in the bucket and the `/natkit/boot-test/*` parameters, and can tag any imported or copied snapshot in the account for release. `iam:PassRole` for the test profile and the `vmimport` role only |
 | `AWS_REGION` | the region for everything |
 | `NATKIT_BUCKET` | S3 bucket for image imports |
 | `NATKIT_TEST_PUBLIC_SUBNET` | subnet with an internet gateway route and an IPv6 CIDR (the module test always checks NAT64) |

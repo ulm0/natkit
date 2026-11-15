@@ -1,15 +1,40 @@
 ---
 title: Getting started
-description: Import the AMI, pick an instance size, and check that it's up.
+description: Get the AMI, pick an instance size, and check that it's up.
 weight: 20
 aliases: [/docs/getting-started/]
 ---
 
-natkit runs from an AMI in your own account. Import it, pick an instance size, and deploy it with the [OpenTofu module](/docs/deploy/opentofu/) or [by hand](/docs/deploy/by-hand/).
+natkit runs from its public AMI in us-east-1, or one you import into your own account. Pick an instance size, and deploy it with the [OpenTofu module](/docs/deploy/opentofu/) or [by hand](/docs/deploy/by-hand/).
 
 ## Get the AMI
 
-The AMIs aren't public. Import a [release](https://github.com/ulm0/natkit/releases)'s disk image into your own account and region, or [build it](/docs/develop/building/):
+The AMIs are public in **us-east-1**, owned by account `208689161537`: `natkit-<version>-arm64` and `natkit-<version>-amd64`. Each [release](https://github.com/ulm0/natkit/releases) lists their IDs. Look them up by owner, never by name alone: anyone can register an AMI with the same name.
+
+```sh
+aws ec2 describe-images --region us-east-1 --owners 208689161537 --filters Name=name,Values=natkit-v0.1.5-arm64 \
+  --query 'Images[0].ImageId' --output text
+```
+
+In OpenTofu:
+
+```hcl
+data "aws_ami" "natkit" {
+  owners = ["208689161537"]
+  filter {
+    name   = "name"
+    values = ["natkit-v0.1.5-arm64"]
+  }
+}
+```
+
+If your account restricts which AMIs it launches ([Allowed AMIs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-allowed-amis.html)), allow that owner.
+
+The three latest releases' AMIs stay up; an older release's are deregistered (see [Upgrading](/docs/deploy/upgrading/#how-long-an-ami-stays-up)).
+
+### In another Region, or to keep it
+
+Import a release's disk image into your own account and Region, or [build it](/docs/develop/building/):
 
 ```sh
 V=v0.1.5 ARCH=arm64 # or amd64
