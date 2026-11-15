@@ -4,7 +4,7 @@ description: How a new release reaches a running NAT, and what each one changes.
 weight: 40
 ---
 
-With the [OpenTofu module](/docs/deploy/opentofu/), a new AMI, new user-data or a change to the primary ENI's security group replaces the instance through an instance refresh of its Auto Scaling group. The replacement launches first, sets itself up and then [takes the ENI over](/docs/how-it-works/high-availability/): egress stops for the handover (14 seconds in a test), and the connections open at that moment are cut. The group puts the new instance in service when natkit completes the [lifecycle hook](/docs/how-it-works/high-availability/#when-the-replacement-fails), and terminates the old one 90 seconds later. A replacement that fails its setup is never put in service, and the old instance stays.
+With the [OpenTofu module](/docs/deploy/opentofu/), a new AMI, new user-data or a change to the primary ENI's security group replaces the instance through an instance refresh of its Auto Scaling group. The replacement launches first, sets itself up and then [takes the ENI over](/docs/how-it-works/high-availability/): egress stops for the handover (usually 10 to 15 seconds, at most about 35 in the tests), and the connections open at that moment are cut. The group puts the new instance in service when natkit completes the [lifecycle hook](/docs/how-it-works/high-availability/#when-the-replacement-fails), and terminates the old one 90 seconds later. A replacement that fails its setup is never put in service, and the old instance stays.
 
 Upgrade the module and the AMI together, from the same release. The module refuses an AMI that doesn't know the keys it sets: from v0.1.5 it sets `lifecycle_hook`, so it refuses the releases up to v0.1.3.
 
