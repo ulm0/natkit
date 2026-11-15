@@ -4,7 +4,8 @@
 #   image   init image (natkit, the Go binary) tested against a mock IMDS/EC2/SSM/Auto Scaling/CloudWatch
 #           (test/init.sh); out/natkit-<arch>-efi.img as an artifact;
 #           init:<sha>, :latest (main), :<tag> (multi-arch)
-#   go      natkit's Go code (init/): gofmt, go vet, unit tests with the race detector, the user-data parser fuzzed
+#   go      natkit's Go code (init/): gofmt, go vet, unit tests with the race detector, govulncheck, the user-data
+#           parser fuzzed
 #   tofu    the OpenTofu configurations are formatted and valid (tofu/nat itself only runs on tags, in the module test)
 #   ami     on v* tags or a manual run: a UEFI AMI per arch named natkit-<tag|sha>-<arch>, tagged natkit.io/release
 #           (scripts/ami.sh), then the end-to-end boot test (scripts/boot-test.sh), one arch at a time (they share
@@ -203,6 +204,10 @@ jobs:
         run: test -z "$(gofmt -l .)" && go vet ./...
       - name: unit tests, with the race detector
         run: go test -count=1 -race -coverprofile=cover.out ./... && go tool cover -func=cover.out | tail -n 1
+      # known vulnerabilities in what natkit calls (its dependencies and Go's library), from vuln.go.dev: a new one
+      # fails the next run, which is the notice to update
+      - name: no known vulnerability in the code natkit calls
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - name: the user-data parser, fuzzed
         run: go test -run '^$' -fuzz FuzzUserData -fuzztime 60s .
       - name: built for both architectures

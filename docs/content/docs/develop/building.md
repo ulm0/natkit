@@ -40,8 +40,21 @@ On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](/docs/depl
 - `tcp_established_timeout` reaches both ENIs;
 - NAT64 at every stage: both test subnets need an IPv6 CIDR, and the private one no egress-only gateway.
 
-Every push also checks the Go code: `gofmt`, `go vet`, the unit tests with the race detector, and the user-data parser fuzzed for a minute.
+Every push also checks the Go code: `gofmt`, `go vet`, the unit tests with the race detector, `govulncheck` (known vulnerabilities in the code natkit calls), and the user-data parser fuzzed for a minute.
 
 Every AMI is tagged `ec2:SharedTag/natkit.io/version`, `ec2:SharedTag/natkit.io/arch` and `ec2:SharedTag/natkit.io/commit`, which accounts it's shared with can read and filter on. Per-commit AMIs are deregistered after each run and are never public. A release, once both boot tests pass, makes its own AMIs public (in the CI Region only), then deregisters those of every release but the three latest. The account blocks public AMIs; the release unblocks that only for its two calls and blocks it again, and the CI role can make public only an AMI tagged as a release's. Public sharing of snapshots stays blocked: a public AMI doesn't need it.
+
+## A pull request's EC2 tests
+
+CI's role only takes `main` and release tags, so a branch can't run the boot and module tests there. `scripts/pr-test.sh` runs them from a laptop, against the disk images the pull request's own `build` run made:
+
+```sh
+git switch <the pull request's branch>
+export AWS_PROFILE=... AWS_REGION=... NATKIT_BUCKET=... \
+  NATKIT_TEST_PUBLIC_SUBNET=... NATKIT_TEST_PRIVATE_SUBNET=... NATKIT_TEST_INSTANCE_PROFILE=...
+scripts/pr-test.sh <pull request number>   # TF=terraform without tofu
+```
+
+It registers an AMI per architecture, boot-tests each, module-tests the arm64 one, and removes the AMIs and their snapshots when it ends. It takes about an hour, and waits while another test routes the private subnet.
 
 `tofu/ci` creates the CI role, test VPC and instance profile. Both roles change only the test VPC, what a test tagged and the module test's group and alarm, plus the import bucket's `import/` and `module-test/`, the `/natkit/boot-test/*` parameters and imported snapshots. The test role publishes to the `natkit` namespace, which production NATs use too: keep those in another account. See the [README](https://github.com/ulm0/natkit#ci) for the repository variables.

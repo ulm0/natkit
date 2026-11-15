@@ -1,0 +1,26 @@
+flush ruleset
+table ip natkit {
+	chain postrouting {
+		type nat hook postrouting priority srcnat; policy accept;
+		oifname "eth0" meta l4proto { tcp, udp } masquerade to :1024-61000 comment "NAT routing rule installed by natkit"
+		oifname "eth0" masquerade
+	}
+}
+table inet natkit {
+	
+	chain input {
+		type filter hook input priority filter; policy drop;
+		ct state established,related accept
+		iifname "lo" accept
+		meta l4proto icmp accept
+		meta l4proto ipv6-icmp accept
+		udp dport 68 accept
+		udp dport 546 accept
+	}
+	chain forward {
+		type filter hook forward priority filter; policy accept;
+		ct state invalid drop
+		
+	}
+	
+}

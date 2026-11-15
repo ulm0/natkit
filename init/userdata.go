@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // userData: the EC2 user-data, YAML with fck-nat's /etc/fck-nat.conf keys, all optional:

@@ -156,6 +156,21 @@ func TestMetrics(t *testing.T) {
 			t.Errorf("status %d, metrics %v, console %q", st, cl.metrics, h.file("/console"))
 		}
 	})
+	// regression: the counters were read after IMDS answered, so the drops of the cycles without it were never reported
+	t.Run("instance metadata a cycle late: the drops since the first reading", func(t *testing.T) {
+		h := metricsHost(t, "nat-a")
+		st, cl := runMetricsWith(t, h, 2, func(md *fakeMetadata, _ *fakeCloud) {
+			md.regionErrs = []error{errors.New("instance metadata placement/region: no answer in time")}
+		})
+		if st != 0 || !reflect.DeepEqual(cl.metrics, [][2]float64{{5, 1234}}) {
+			t.Errorf("status %d, metrics %v", st, cl.metrics)
+		}
+		want := "natkit-metrics: can't publish: instance metadata placement/region: no answer in time\n" +
+			"natkit-metrics: publishing to CloudWatch, namespace natkit, Name=nat-a\n"
+		if got := h.file("/console"); got != want {
+			t.Errorf("console %q", got)
+		}
+	})
 	t.Run("no counters", func(t *testing.T) {
 		h := metricsHost(t, "nat-a")
 		h.answer = nil

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +82,9 @@ func TestInitPlainNAT(t *testing.T) {
 	}
 	if got := c.h.file("/proc/sys/kernel/dmesg_restrict"); !strings.HasPrefix(got, "<") {
 		t.Error("a kernel.* sysctl under test/init.sh (the docker host's kernel)")
+	}
+	if got := c.h.file("/proc/sys/kernel/modules_disabled"); !strings.HasPrefix(got, "<") {
+		t.Error("modules_disabled under test/init.sh: it would lock the docker host's kernel")
 	}
 	for _, f := range []string{"all/rp_filter", "eth0/rp_filter", "default/send_redirects", "eth0/send_redirects"} {
 		if got := c.h.file("/proc/sys/net/ipv4/conf/" + f); got != "0\n" {
@@ -401,6 +405,75 @@ func TestInitFailures(t *testing.T) {
 	})
 }
 
+// a setting the kernel refuses is a failed boot, not a NAT that quietly doesn't forward: each write, refused in turn
+// (a directory where the file is)
+func TestInitSysctlRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name, ud string
+		testMode bool
+		path     string
+		want     string
+	}{
+		{"sysctl.conf", "", true, "/proc/sys/net/ipv4/ip_forward", "sysctl net.ipv4.ip_forward=1"},
+		{"a kernel.* key, on the instance", "", false, "/proc/sys/kernel/dmesg_restrict", "sysctl kernel.dmesg_restrict=1"},
+		{"user-data tuning", "tcp_keepalive_time: 600", true, "/proc/sys/net/ipv4/tcp_keepalive_time", "sysctl net.ipv4.tcp_keepalive_time=600"},
+		{"the conntrack table", "nf_conntrack_max: 262144", true, "/proc/sys/net/netfilter/nf_conntrack_max", "sysctl net.netfilter.nf_conntrack_max=262144"},
+		{"the conntrack buckets", "nf_conntrack_buckets: 4096", true, "/sys/module/nf_conntrack/parameters/hashsize", "nf_conntrack_buckets=4096"},
+		{"modules_disabled", "", false, "/proc/sys/kernel/modules_disabled", "sysctl kernel.modules_disabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := runInitWith(t, "eip_id: eipalloc-0123\n"+tc.ud, tc.testMode, func(c *initCase) {
+				_ = os.Remove(c.h.path(tc.path))
+				c.h.mkdir(tc.path)
+			})
+			c.wantFail(t, tc.want)
+			if len(c.cl.calls) != 0 {
+				t.Errorf("AWS calls after a refused setting: %v", c.cl.calls)
+			}
+		})
+	}
+	// per interface, after the ENI and the EIP: the ENI attached just now is one of them
+	t.Run("an interface's rp_filter", func(t *testing.T) {
+		c := runInitWith(t, "", true, func(c *initCase) {
+			_ = os.Remove(c.h.path("/proc/sys/net/ipv4/conf/eth0/rp_filter"))
+			c.h.mkdir("/proc/sys/net/ipv4/conf/eth0/rp_filter")
+		})
+		c.wantFail(t, "sysctl net.ipv4.conf.eth0.rp_filter=0")
+	})
+	t.Run("no sysctl.conf", func(t *testing.T) {
+		c := runInitWith(t, "", true, func(c *initCase) { _ = os.Remove(c.h.path("/etc/natkit/sysctl.conf")) })
+		c.wantFail(t, "sysctl: open ")
+	})
+}
+
+// an API that refuses every try: the failure names the call, after 10 tries, and the ENI stays with its instance
+func TestInitCallsRefused(t *testing.T) {
+	denied := func(action string) error {
+		return errors.New(action + ": HTTP 403 UnauthorizedOperation: not authorized")
+	}
+	t.Run("DescribeAutoScalingInstances", func(t *testing.T) {
+		c := runInitWith(t, "eni_id: eni-0bbbbbbbbbbbbbbbb\nlifecycle_hook: natkit-ready", true, func(c *initCase) {
+			c.cl.asgErr = denied("DescribeAutoScalingInstances")
+		})
+		c.wantFail(t, "DescribeAutoScalingInstances failed: natkit-init: DescribeAutoScalingInstances: HTTP 403 UnauthorizedOperation: not authorized")
+		if a := c.cl.actions(); len(a) != 10 || slices.ContainsFunc(a, func(s string) bool { return s != "DescribeAutoScalingInstances" }) {
+			t.Errorf("calls %v", c.cl.calls)
+		}
+		if c.h.slept != 27*time.Second {
+			t.Errorf("slept %v", c.h.slept)
+		}
+	})
+	t.Run("ModifyNetworkInterfaceAttribute", func(t *testing.T) {
+		c := runInitWith(t, "eip_id: eipalloc-0123\neni_id: eni-0bbbbbbbbbbbbbbbb", true, func(c *initCase) {
+			c.cl.sourceDestErr = denied("ModifyNetworkInterfaceAttribute")
+		})
+		c.wantFail(t, "ModifyNetworkInterfaceAttribute "+testENI+" failed: natkit-init: ModifyNetworkInterfaceAttribute: HTTP 403 UnauthorizedOperation: not authorized")
+		if a := c.cl.actions(); len(a) != 10 || slices.ContainsFunc(a, func(s string) bool { return s != "ModifyNetworkInterfaceAttribute" }) {
+			t.Errorf("calls %v", c.cl.calls)
+		}
+	})
+}
+
 func TestInitMetrics(t *testing.T) {
 	t.Run("written once the instance is in service", func(t *testing.T) {
 		c := runInitWith(t, "metrics: nat-a", true, func(c *initCase) { c.h.answer = ethtoolENA("153914") })
@@ -441,6 +514,8 @@ func TestInitConntrackDefaults(t *testing.T) {
 		{"t3.nano: memory", "", "25000", "55327\n", "13831\n"},
 		{"no ENA counters: memory", "", "", "55327\n", "13831\n"},
 		{"user-data wins", "nf_conntrack_max: 262144\nnf_conntrack_buckets: 65536", "153914", "262144\n", "65536\n"},
+		{"only the table: a quarter as many buckets", "nf_conntrack_max: 100000", "153914", "100000\n", "25000\n"},
+		{"only the buckets: the table by the allowance", "nf_conntrack_buckets: 4096", "153914", "153914\n", "4096\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := runInitWith(t, tc.ud, false, func(c *initCase) {
@@ -574,6 +649,15 @@ func TestRuleset(t *testing.T) {
 	} {
 		if !strings.Contains(gated, want) {
 			t.Errorf("no %q in\n%s", want, gated)
+		}
+	}
+	for file, got := range map[string]string{"ruleset-plain.nft": plain, "ruleset-clients.nft": gated} {
+		want, err := os.ReadFile("testdata/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != string(want) {
+			t.Errorf("%s:\n%s\nwant\n%s", file, got, want)
 		}
 	}
 	u4, _ := parseUserData([]byte(`client_cidrs: [192.168.0.0/24]`))

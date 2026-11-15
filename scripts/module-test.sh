@@ -28,6 +28,13 @@ export TF_VAR_ami_id="$1" TF_VAR_arch="$2" TF_VAR_tag="$TAG" TF_VAR_public_subne
 	TF_VAR_private_subnet="${NATKIT_TEST_PRIVATE_SUBNET:?}" TF_VAR_instance_profile="${NATKIT_TEST_INSTANCE_PROFILE:?}"
 KEY=module-test/$TAG.tfstate
 L=$(mktemp -d)
+# From a laptop: tofu reads fewer kinds of profile than the aws CLI (not `aws login`'s). It gets the CLI's
+# credentials, which the CLI keeps fresh, through a profile of its own. CI's are in the environment: no profile.
+if [ -n "${AWS_PROFILE:-}" ]; then
+	printf '[profile natkit-module-test]\ncredential_process = env "AWS_CONFIG_FILE=%s" aws configure export-credentials --profile "%s" --format process\n' \
+		"${AWS_CONFIG_FILE:-$HOME/.aws/config}" "$AWS_PROFILE" >"$L/aws-config"
+	export AWS_CONFIG_FILE="$L/aws-config" AWS_PROFILE=natkit-module-test
+fi
 
 tf() { "$TF" -chdir=test/module "$@" -input=false -no-color; }
 out() { "$TF" -chdir=test/module output -raw "$1"; }
