@@ -43,6 +43,8 @@ data "aws_ami" "natkit" {
 }
 ```
 
+There's no `latest` tag. Pin the version: the [module](/docs/deploy/opentofu/) and the AMI go together, from the same release, and a newer AMI would replace the instance at an `apply` nobody planned. To take the newest anyway, drop the version filter and set `most_recent = true`, and upgrade the module with it.
+
 If your account restricts which AMIs it launches ([Allowed AMIs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-allowed-amis.html)), allow that owner.
 
 The three latest releases' AMIs stay up; an older release's are deregistered (see [Upgrading](/docs/deploy/upgrading/#how-long-an-ami-stays-up)).
