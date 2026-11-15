@@ -17,14 +17,15 @@ import (
 // fakeMetadata: IMDS, as the mock in test/mock.py has it: one instance, its primary ENI, and the static ENI once
 // attached.
 type fakeMetadata struct {
-	mu        sync.Mutex
-	values    map[string]string // meta-data paths
-	user      []byte
-	userErr   error
-	regionVal string
-	regionErr error
-	downFor   int // instance-id fails this many times first (IMDS not up yet)
-	attached  *bool
+	mu         sync.Mutex
+	values     map[string]string // meta-data paths
+	user       []byte
+	userErr    error
+	regionVal  string
+	regionErr  error
+	regionErrs []error // in turn, first
+	downFor    int     // instance-id fails this many times first (IMDS not up yet)
+	attached   *bool
 }
 
 const (
@@ -69,7 +70,12 @@ func (m *fakeMetadata) get(_ context.Context, p string) (string, error) {
 }
 
 func (m *fakeMetadata) userData(context.Context) ([]byte, error) { return m.user, m.userErr }
-func (m *fakeMetadata) region(context.Context) (string, error)   { return m.regionVal, m.regionErr }
+func (m *fakeMetadata) region(context.Context) (string, error) {
+	if err := pop(&m.regionErrs); err != nil {
+		return "", err
+	}
+	return m.regionVal, m.regionErr
+}
 
 // fakeCloud: AWS, with every call recorded and each answer programmable
 type fakeCloud struct {
