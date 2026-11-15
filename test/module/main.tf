@@ -2,7 +2,7 @@
 # client there whose serial console shows whether it gets out. The state is in S3 (init -backend-config), so CI's
 # cleanup job can destroy what a cancelled run left behind.
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.10" # the s3 backend's use_lockfile
   backend "s3" {
     use_lockfile = true
   }
