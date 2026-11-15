@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"net/url"
 	"reflect"
 	"strings"
@@ -448,6 +449,70 @@ func TestNoInstanceRole(t *testing.T) {
 	}
 	if n := len(s.reqs); n != 0 {
 		t.Errorf("%d requests sent unsigned", n)
+	}
+}
+
+// closedBody: a request body as smithy-go's: closed by the caller once the response is there, and its WriteTo then
+// returns io.EOF. Here WriteTo waits for that Close, the order that is otherwise a matter of microseconds.
+type closedBody struct {
+	r      io.Reader
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (b *closedBody) Read(p []byte) (int, error) { return b.r.Read(p) }
+func (b *closedBody) Close() error               { b.once.Do(func() { close(b.closed) }); return nil }
+func (b *closedBody) WriteTo(io.Writer) (int64, error) {
+	select {
+	case <-b.closed:
+	case <-time.After(5 * time.Second):
+	}
+	return 0, io.EOF
+}
+
+// regression: an answer that arrived while net/http was still finishing the request's write closed the connection
+// (smithy-go's body says io.EOF from WriteTo once closed), and a call that EC2 had carried out failed
+func TestAnswerBeforeTheRequestIsWritten(t *testing.T) {
+	answer := bytes.Repeat([]byte("x"), 1<<20) // more than the client has read before it closes the body
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Write(answer)
+	}))
+	defer srv.Close()
+	call := func(c aws.HTTPClient) error {
+		body := &closedBody{r: strings.NewReader("Action=X"), closed: make(chan struct{})}
+		req, err := http.NewRequest("POST", srv.URL, body)
+		if err != nil {
+			return err
+		}
+		req.ContentLength = 8
+		wrote := make(chan struct{})
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+			WroteRequest: func(httptrace.WroteRequestInfo) { close(wrote) },
+		}))
+		resp, err := c.Do(req)
+		if err != nil {
+			return err
+		}
+		req.Body.Close() // as smithy-go, right after Do
+		defer resp.Body.Close()
+		select { // net/http is done with the request, one way or the other: no race with the read below
+		case <-wrote:
+		case <-time.After(10 * time.Second):
+			return errors.New("the request's write never ended")
+		}
+		got, err := io.ReadAll(resp.Body)
+		if err == nil && len(got) != len(answer) {
+			err = errors.New("short answer")
+		}
+		return err
+	}
+	if err := call(readerBodies{&http.Client{}}); err != nil {
+		t.Errorf("the answer couldn't be read: %v", err)
+	}
+	// what it guards against: without it, this order does lose the answer
+	if err := call(&http.Client{}); err == nil {
+		t.Error("net/http alone read the answer: the test no longer shows the failure")
 	}
 }
 

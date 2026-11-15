@@ -31,9 +31,11 @@ With the AWS CLI, `describe-images --include-deprecated`.
 
 Without the module, launch an instance from the new AMI in place of the old one; with an Auto Scaling group of your own, put the new AMI in its launch template and start an instance refresh.
 
-## To v0.1.6
+## To v0.1.7
 
-Nothing changes on a running NAT: the same settings, console lines and behaviour as v0.1.5. With the module, moving to v0.1.6's AMI replaces the instance once, as any new AMI does.
+v0.1.6 was tagged but not released: its build failed, and v0.1.7 fixes the cause. From v0.1.5, nothing changes on a running NAT: the same settings, console lines and behaviour. With the module, moving to v0.1.7's AMI replaces the instance once, as any new AMI does.
+
+- An AWS call whose answer arrived within microseconds could fail after AWS had carried it out (a race in the AWS SDK's HTTP layer, seen against the test mock only). natkit tries the call again, but an attach or a lifecycle hook's completion can't be done twice. natkit now sends its requests so that it can't happen.
 
 - The AMIs are public in us-east-1 (owner `208689161537`), tagged `ec2:SharedTag/natkit.io/version`, `/arch` and `/commit`: an AMI you imported yourself there can go. Look the public one up with the owner.
 - A published release's AMIs are never removed. Past AWS's two-year deprecation, look them up with `include_deprecated = true`.

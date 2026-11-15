@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
@@ -118,8 +120,9 @@ func newCloud(c config, region string, md *imds.Client) *sdkCloud {
 			}
 			return c, nil
 		})),
-		Retryer: func() aws.Retryer { return aws.NopRetryer{} },
-		AppID:   "natkit-" + version, // CloudTrail's userAgent says which natkit made the call
+		Retryer:    func() aws.Retryer { return aws.NopRetryer{} },
+		AppID:      "natkit-" + version, // CloudTrail's userAgent says which natkit made the call
+		HTTPClient: readerBodies{awshttp.NewBuildableClient()},
 	}
 	ep := func(u string) *string {
 		if u == "" {
@@ -133,6 +136,23 @@ func newCloud(c config, region string, md *imds.Client) *sdkCloud {
 		ssm: ssm.NewFromConfig(cfg, func(o *ssm.Options) { o.BaseEndpoint = ep(c.ssm) }),
 		cw:  cloudwatch.NewFromConfig(cfg, func(o *cloudwatch.Options) { o.BaseEndpoint = ep(c.cloudwatch) }),
 	}
+}
+
+// readerBodies: the SDK's HTTP client, with request bodies that only Read.
+//
+// smithy-go (v1.28.9) closes a request's body as soon as the response is there, and its body's WriteTo then returns
+// io.EOF. net/http can still be finishing the request's write at that moment (its look for bytes past
+// Content-Length, which uses WriteTo): it takes the io.EOF for a failed write and closes the connection, and the
+// answer to a call that went through can't be read ("use of closed network connection"). It takes an answer that
+// arrives within microseconds (test/mock.py did it about once in a hundred runs), but the call then fails after
+// EC2 carried it out. A body that only Reads ends with Read's io.EOF, which is how a body ends.
+type readerBodies struct{ c aws.HTTPClient }
+
+func (h readerBodies) Do(r *http.Request) (*http.Response, error) {
+	if r.Body != nil {
+		r.Body = struct{ io.ReadCloser }{r.Body}
+	}
+	return h.c.Do(r)
 }
 
 func (s *sdkCloud) sourceDestCheckOff(ctx context.Context, eni string) error {
