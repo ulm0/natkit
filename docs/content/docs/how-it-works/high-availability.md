@@ -20,7 +20,7 @@ The takeover needs `ec2:DescribeNetworkInterfaces` and `ec2:DetachNetworkInterfa
 
 fck-nat takes the EIP first. That moves egress off the EIP while the old instance is still routing. natkit takes the ENI first to avoid that gap.
 
-The [OpenTofu module](/docs/deploy/opentofu/) sets up this layout. Its Auto Scaling group launches the replacement before it terminates the old instance, so egress stops only for the handover: 14 seconds in a test. Connections open at that moment are cut, because the new instance doesn't know them.
+The [OpenTofu module](/docs/deploy/opentofu/) sets up this layout. Its Auto Scaling group launches the replacement before it terminates the old instance, so egress stops only for the handover: usually 10 to 15 seconds. Of 31 handovers in the tests, the slowest took about 35 seconds, when the attached ENI took 25 seconds to show up in the new instance. Connections open at that moment are cut, because the new instance doesn't know them.
 
 ## When the replacement fails
 

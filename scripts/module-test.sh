@@ -4,7 +4,8 @@
 #  1. the defaults: the client's egress is the EIP, IPv4 and NAT64; the public security group admits nothing, the
 #     private one the VPC's CIDRs
 #  2. handover: a user-data change refreshes the instance. The replacement launches first and takes the ENI over:
-#     the client may be without egress for at most NATKIT_HANDOVER_MAX seconds (default 30)
+#     the client may be without egress for at most NATKIT_HANDOVER_MAX seconds (default 60: it is 10 to 15 s, and
+#     34 s once, when the attached ENI took 25 s to show up in the instance)
 #  3. a replacement whose setup fails (a setting natkit refuses): it never completes the group's lifecycle hook,
 #     so the group keeps the old instance and the client's egress never stops; a good setting then goes through
 #  4. conntrack alarm: natkit publishes the allowance counters under the module's name, and the alarm exists
@@ -22,7 +23,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 TAG=${NATKIT_MODULE_TEST_TAG:-$1}
-MAX=${NATKIT_HANDOVER_MAX:-30}
+MAX=${NATKIT_HANDOVER_MAX:-60}
 TF=${TF:-tofu}
 export TF_VAR_ami_id="$1" TF_VAR_arch="$2" TF_VAR_tag="$TAG" TF_VAR_public_subnet="${NATKIT_TEST_PUBLIC_SUBNET:?}" \
 	TF_VAR_private_subnet="${NATKIT_TEST_PRIVATE_SUBNET:?}" TF_VAR_instance_profile="${NATKIT_TEST_INSTANCE_PROFILE:?}"

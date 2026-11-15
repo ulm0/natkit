@@ -33,7 +33,7 @@ natkit's own code is one Go binary in `init/`, on the AWS SDK for Go v2: `natkit
 
 On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](/docs/deploy/opentofu/) and checks:
 
-- an instance refresh leaves the client without egress for at most 30 seconds;
+- an instance refresh leaves the client without egress for at most 60 seconds (it is usually 10 to 15);
 - a replacement whose setup fails doesn't stop egress;
 - the conntrack alarm's metric is published;
 - a client outside `client_cidrs` gets nothing through, with `untracked`;
