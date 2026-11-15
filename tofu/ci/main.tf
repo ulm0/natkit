@@ -255,12 +255,25 @@ resource "aws_iam_role_policy" "github" {
         Action   = ["ec2:GetImageBlockPublicAccessState", "ec2:DisableImageBlockPublicAccess", "ec2:EnableImageBlockPublicAccess"]
         Resource = "*"
       },
-      # boot-cleanup prunes per-commit AMIs; only images/snapshots scripts/ami.sh tagged
+      # boot-cleanup prunes per-commit AMIs, the release a lower release's that never went public; only images and
+      # snapshots scripts/ami.sh tagged. Never a public AMI: a published release's stay for good (launch templates
+      # name them), and a bug in a prune step must not be able to take one. A public AMI's snapshot can't be deleted
+      # either: EC2 refuses while the AMI is registered. (Against a mistake, not a job that unpublishes one first.)
       {
-        Sid       = "PruneAmis"
+        Sid      = "PruneAmis"
+        Effect   = "Allow"
+        Action   = "ec2:DeregisterImage"
+        Resource = "${local.arn}:ec2:${local.region}::image/*"
+        Condition = {
+          StringLike = { "aws:ResourceTag/natkit.io/release" = "natkit-*" }
+          Bool       = { "ec2:Public" = "false" }
+        }
+      },
+      {
+        Sid       = "PruneSnapshots"
         Effect    = "Allow"
-        Action    = ["ec2:DeregisterImage", "ec2:DeleteSnapshot"]
-        Resource  = ["${local.arn}:ec2:${local.region}::image/*", "${local.arn}:ec2:${local.region}::snapshot/*"]
+        Action    = "ec2:DeleteSnapshot"
+        Resource  = "${local.arn}:ec2:${local.region}::snapshot/*"
         Condition = { StringLike = { "aws:ResourceTag/natkit.io/release" = "natkit-*" } }
       },
       { Sid = "TestParameters", Effect = "Allow", Action = ["ssm:PutParameter", "ssm:DeleteParameter"], Resource = [for p in local.test_params : "${local.ssm_arn}:parameter${p}"] },
