@@ -11,7 +11,8 @@
 #           (scripts/ami.sh), then the end-to-end boot test (scripts/boot-test.sh), one arch at a time (they share
 #           the test subnet's route table), and on arm64 the OpenTofu module's test (scripts/module-test.sh)
 #   release on v* tags, once both AMIs pass: the AMIs are made public (launch permission for all accounts, in
-#           AWS_REGION only), the GitHub release, then the AMIs of all but the three latest releases are deregistered
+#           AWS_REGION only), the GitHub release; a published release's AMIs are never deregistered, only those of a
+#           lower release that never went public (its tests failed)
 # Repo secret: AWS_ROLE_ARN (GitHub OIDC role; a secret so the account ID stays out of the public logs).
 # Repo variables: AWS_REGION, NATKIT_BUCKET, NATKIT_TEST_PUBLIC_SUBNET,
 # NATKIT_TEST_PRIVATE_SUBNET, NATKIT_TEST_INSTANCE_PROFILE.
@@ -411,7 +412,7 @@ jobs:
               echo "- $arch: \`$ami\` (natkit-$TAG-$arch)"
             done
             echo
-            echo "In any other Region, import the disk image below (\`scripts/ami.sh\`). The AMIs stay up for three releases: see [Upgrading](https://natkit.ulm0.com/docs/deploy/upgrading/)."
+            echo "In any other Region, import the disk image below (\`scripts/ami.sh\`). A release's AMIs are never removed; AWS deprecates them after two years: see [Upgrading](https://natkit.ulm0.com/docs/deploy/upgrading/#how-long-an-ami-stays-up)."
             echo
             echo "Kernel $version, boot-tested (EIP, static ENI handover, NAT64 module, CloudWatch agent)."
             echo
@@ -423,19 +424,17 @@ jobs:
           for arch in arm64 amd64; do gzip -9 <"out/natkit-$arch-efi.img" >"natkit-$TAG-$arch-efi.img.gz"; done
           sha256sum natkit-"$TAG"-*-efi.img.gz >SHA256SUMS
           gh release upload "$TAG" --clobber natkit-"$TAG"-*-efi.img.gz SHA256SUMS
-      # The three latest releases' AMIs stay (this one included): an Auto Scaling group whose launch template names an
-      # older public AMI can still replace its instance until then. Those of the releases before go.
-      - name: prune all but the three latest releases' AMIs
+      # A published release's AMIs stay for good: launch templates and Auto Scaling groups name them, by ID or by name
+      # and owner, and a replacement must find them. Only a lower release's that never went public (its tests failed,
+      # as v0.1.4's) go: nobody can launch those.
+      - name: prune lower releases that were never published
         run: |
           aws ec2 describe-images --owners self --output text --filters Name=tag-key,Values=natkit.io/release \
-            --query 'Images[].[ImageId,Name]' >images.txt
-          keep=$(awk '{print $2}' images.txt | sed -nE 's/^natkit-(v.+)-(arm64|amd64)$/\1/p' | sort -uV | tail -n 3)
-          echo "keeping $(echo $keep)"
-          while read -r ami name; do
+            --query 'Images[].[ImageId,Name,Public]' | while read -r ami name public; do
             case $name in natkit-v*-arm64 | natkit-v*-amd64) ;; *) continue ;; esac
+            [ "$public" = False ] || continue
             v=${name#natkit-} && v=${v%-*}
-            [ "$v" = "$TAG" ] && continue
-            echo "$keep" | grep -qxF "$v" && continue
-            echo "deregistering $ami ($name) and its snapshots"
+            [ "$v" != "$TAG" ] && [ "$(printf '%s\n%s\n' "$v" "$TAG" | sort -V | head -n 1)" = "$v" ] || continue
+            echo "deregistering $ami ($name, never published) and its snapshots"
             aws ec2 deregister-image --image-id "$ami" --delete-associated-snapshots >/dev/null
-          done <images.txt
+          done

@@ -42,7 +42,7 @@ On arm64, `scripts/module-test.sh` then applies the [OpenTofu module](/docs/depl
 
 Every push also checks the Go code: `gofmt`, `go vet`, the unit tests with the race detector, `govulncheck` (known vulnerabilities in the code natkit calls), and the user-data parser fuzzed for a minute.
 
-Every AMI is tagged `ec2:SharedTag/natkit.io/version`, `ec2:SharedTag/natkit.io/arch` and `ec2:SharedTag/natkit.io/commit`, which accounts it's shared with can read and filter on. Per-commit AMIs are deregistered after each run and are never public. A release, once both boot tests pass, makes its own AMIs public (in the CI Region only), then deregisters those of every release but the three latest. The account blocks public AMIs; the release unblocks that only for its two calls and blocks it again, and the CI role can make public only an AMI tagged as a release's. Public sharing of snapshots stays blocked: a public AMI doesn't need it.
+Every AMI is tagged `ec2:SharedTag/natkit.io/version`, `ec2:SharedTag/natkit.io/arch` and `ec2:SharedTag/natkit.io/commit`, which accounts it's shared with can read and filter on. Per-commit AMIs are deregistered after each run and are never public. A release, once both boot tests pass, makes its own AMIs public (in the CI Region only). A published release's AMIs are never deregistered; a lower release's that never went public (its tests failed) are. The account blocks public AMIs; the release unblocks that only for its two calls and blocks it again, and the CI role can make public only an AMI tagged as a release's. Public sharing of snapshots stays blocked: a public AMI doesn't need it.
 
 ## A pull request's EC2 tests
 
