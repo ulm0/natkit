@@ -18,8 +18,10 @@ PR=$1
 
 sha=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
 [ "$(git rev-parse HEAD)" = "$sha" ] || { echo "check out pull request $PR's head ($sha) first" >&2 && exit 1; }
-run=$(gh run list --workflow build --event pull_request --commit "$sha" --status success --limit 1 --json databaseId --jq '.[0].databaseId')
-[ -n "$run" ] || { echo "no build run of $sha has passed yet" >&2 && exit 1; }
+# its conclusion from the run itself: the API's status=success filter can leave out a run that has passed
+run=$(gh run list --workflow build --event pull_request --commit "$sha" --limit 1 --json databaseId,conclusion \
+	--jq '.[0] | select(.conclusion == "success") | .databaseId')
+[ -n "$run" ] || { echo "no build run of $sha has passed (yet?)" >&2 && exit 1; }
 
 D=$(mktemp -d)
 amis=''
