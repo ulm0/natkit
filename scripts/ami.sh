@@ -5,6 +5,9 @@
 #   scripts/ami.sh <image> <arm64|amd64> <name> [tag=value ...]
 #   e.g. scripts/ami.sh out/natkit-arm64-efi.img arm64 natkit-v0.1.0-arm64 natkit.io/release=v0.1.0
 #
+# The tags go on the AMI and its snapshot, except ec2:SharedTag/ ones: those are the AMI's alone (EC2 takes them on
+# images only), and every account the AMI is shared with sees them, public included.
+#
 # Needs: AWS credentials + AWS_REGION, NATKIT_BUCKET (S3 bucket in that region), and the `vmimport` service role
 # (https://docs.aws.amazon.com/vm-import/latest/userguide/required-permissions.html). Prints the AMI ID.
 set -eu
@@ -49,6 +52,7 @@ tags="{Key=Name,Value=$NAME}"
 snaptags="Key=Name,Value=$NAME"
 for t in "$@"; do
 	tags="$tags,{Key=${t%%=*},Value=${t#*=}}"
+	case $t in ec2:SharedTag/*) continue ;; esac
 	snaptags="$snaptags Key=${t%%=*},Value=${t#*=}"
 done
 # shellcheck disable=SC2086 # one word per tag; boot-cleanup prunes snapshots by natkit.io/release

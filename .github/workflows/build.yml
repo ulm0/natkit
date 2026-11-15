@@ -237,8 +237,11 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
       - id: ami
         run: |
-          name=natkit-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}-${{ matrix.arch }}
-          ami=$(scripts/ami.sh out/natkit-${{ matrix.arch }}-efi.img ${{ matrix.arch }} "$name" "natkit.io/release=$name")
+          version=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+          name=natkit-$version-${{ matrix.arch }}
+          # ec2:SharedTag/: visible to every account the AMI is shared with (public, for a release), to find it by tag
+          ami=$(scripts/ami.sh out/natkit-${{ matrix.arch }}-efi.img ${{ matrix.arch }} "$name" "natkit.io/release=$name" \
+            "ec2:SharedTag/natkit.io/version=$version" "ec2:SharedTag/natkit.io/arch=${{ matrix.arch }}")
           echo "ami=$ami" >>"$GITHUB_OUTPUT"
           echo "### AMI \`$ami\` ($name, $AWS_REGION)" >>"$GITHUB_STEP_SUMMARY"
       - name: boot test (EIP, static ENI, client egress, handover, CloudWatch agent)

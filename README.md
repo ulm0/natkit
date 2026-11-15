@@ -20,11 +20,13 @@ Docs: [natkit.ulm0.com](https://natkit.ulm0.com).
 ## Usage
 
 The AMIs are public in us-east-1, owned by account `208689161537`, named `natkit-<version>-arm64` and
-`natkit-<version>-amd64`; each [release](https://github.com/ulm0/natkit/releases) lists their IDs. Look them up by
-owner, never by name alone (anyone can register an AMI with the same name):
+`natkit-<version>-amd64`, and tagged `ec2:SharedTag/natkit.io/version` (`v0.1.5`) and
+`ec2:SharedTag/natkit.io/arch` (`arm64`, `amd64`); each [release](https://github.com/ulm0/natkit/releases) lists their
+IDs. Look them up by tag or name, always with the owner: anyone can register an AMI with the same name or tags.
 
 ```sh
-aws ec2 describe-images --region us-east-1 --owners 208689161537 --filters Name=name,Values=natkit-v0.1.5-arm64 \
+aws ec2 describe-images --region us-east-1 --owners 208689161537 \
+  --filters Name=tag:ec2:SharedTag/natkit.io/version,Values=v0.1.5 Name=tag:ec2:SharedTag/natkit.io/arch,Values=arm64 \
   --query 'Images[0].ImageId' --output text
 ```
 
