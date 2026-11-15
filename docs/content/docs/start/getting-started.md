@@ -11,12 +11,13 @@ natkit runs from its public AMI in us-east-1, or one you import into your own ac
 
 The AMIs are public in **us-east-1**, owned by account `208689161537`: `natkit-<version>-arm64` and `natkit-<version>-amd64`. Each [release](https://github.com/ulm0/natkit/releases) lists their IDs.
 
-They carry two tags every account sees (EC2's [shared tags](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html#sharing-tags)):
+They carry three tags every account sees (EC2's [shared tags](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html#sharing-tags)):
 
 | Tag | Value |
 |---|---|
 | `ec2:SharedTag/natkit.io/version` | the release, e.g. `v0.1.5` |
 | `ec2:SharedTag/natkit.io/arch` | `arm64` or `amd64` |
+| `ec2:SharedTag/natkit.io/commit` | the commit it was built from |
 
 Look them up by tag or by name, always with the owner: anyone can register an AMI with the same name or the same tags.
 

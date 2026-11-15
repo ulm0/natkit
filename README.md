@@ -21,7 +21,7 @@ Docs: [natkit.ulm0.com](https://natkit.ulm0.com).
 
 The AMIs are public in us-east-1, owned by account `208689161537`, named `natkit-<version>-arm64` and
 `natkit-<version>-amd64`, and tagged `ec2:SharedTag/natkit.io/version` (`v0.1.5`) and
-`ec2:SharedTag/natkit.io/arch` (`arm64`, `amd64`); each [release](https://github.com/ulm0/natkit/releases) lists their
+`ec2:SharedTag/natkit.io/arch` (`arm64`, `amd64`), plus `ec2:SharedTag/natkit.io/commit` (the source commit); each [release](https://github.com/ulm0/natkit/releases) lists their
 IDs. Look them up by tag or name, always with the owner: anyone can register an AMI with the same name or tags.
 
 ```sh
