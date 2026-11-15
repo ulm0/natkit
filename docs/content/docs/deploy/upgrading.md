@@ -10,13 +10,22 @@ Upgrade the module and the AMI together, from the same release. The module refus
 
 ## How long an AMI stays up
 
-A release's public AMIs stay up until three newer releases exist: when v0.1.8 comes out, v0.1.5's are deregistered. An instance already running from a deregistered AMI keeps running, but an Auto Scaling group can't launch from it any more: when its instance fails, or at the next instance refresh, it has no NAT to replace it with. Upgrade before then, or keep a copy of the AMI in your own account:
+For good. A release's public AMIs are never deregistered, so a launch template or an Auto Scaling group that names one can always launch from it, and its name (`natkit-<version>-<arch>`) always means the same AMI: natkit never registers a name twice.
 
-```sh
-aws ec2 copy-image --region us-east-1 --source-region us-east-1 --source-image-id ami-... --name natkit-v0.1.5-arm64
+AWS deprecates every public AMI two years after it's created (v0.1.5's in November 2028), and only a private AMI's deprecation can be put off. A deprecated AMI still launches by its ID. A lookup by name or tags skips it unless it asks for deprecated AMIs:
+
+```hcl
+data "aws_ami" "natkit" {
+  owners             = ["208689161537"]
+  include_deprecated = true # still found after its deprecation date
+  filter {
+    name   = "name"
+    values = ["natkit-v0.1.5-arm64"]
+  }
+}
 ```
 
-A copy is yours, and its snapshot is yours to pay (see [Costs](/docs/operate/costs/#the-ami)).
+With the AWS CLI, `describe-images --include-deprecated`.
 
 ## Without the module
 

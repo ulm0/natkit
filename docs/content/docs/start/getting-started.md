@@ -47,9 +47,9 @@ There's no `latest` tag. Pin the version: the [module](/docs/deploy/opentofu/) a
 
 If your account restricts which AMIs it launches ([Allowed AMIs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-allowed-amis.html)), allow that owner.
 
-The three latest releases' AMIs stay up; an older release's are deregistered (see [Upgrading](/docs/deploy/upgrading/#how-long-an-ami-stays-up)).
+A release's AMIs are never removed. Two years after its creation AWS deprecates a public AMI: it still launches, but a lookup needs `include_deprecated = true` to find it (see [Upgrading](/docs/deploy/upgrading/#how-long-an-ami-stays-up)).
 
-### In another Region, or to keep it
+### In another Region
 
 Import a release's disk image into your own account and Region, or [build it](/docs/develop/building/):
 

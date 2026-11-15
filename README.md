@@ -30,9 +30,10 @@ aws ec2 describe-images --region us-east-1 --owners 208689161537 \
   --query 'Images[0].ImageId' --output text
 ```
 
-The three latest releases' AMIs stay up; older ones are deregistered (see
-[Upgrading](https://natkit.ulm0.com/docs/deploy/upgrading/)). In any other Region, or to keep an AMI for good, import
-the release's disk image into your own account (or [build it](#building)):
+A release's AMIs are never removed; AWS deprecates public AMIs two years after they're created, which hides them
+from searches unless you ask for deprecated ones (see
+[Upgrading](https://natkit.ulm0.com/docs/deploy/upgrading/#how-long-an-ami-stays-up)). In any other Region, import the
+release's disk image into your own account (or [build it](#building)):
 
 ```sh
 V=v0.1.5 ARCH=arm64 # or amd64
@@ -187,7 +188,7 @@ instead: it holds the account ID, and the run logs are public):
 
 | Variable | |
 |---|---|
-| `AWS_ROLE_ARN` (secret) | GitHub OIDC role, assumable only from `main` and `v*` tags. It imports and registers AMIs, makes a release's AMIs (tagged `natkit.io/release=natkit-v*`) public, turning the account's block public access for AMIs off for that and back on, and deletes the AMIs it tagged `natkit.io/release` (per-commit AMIs after each run, a release's once three newer releases are out). For the tests it creates instances, EIPs, ENIs, security groups and a launch template with a test's tag, and an Auto Scaling group and an alarm named `natkit-module-test-*`; it changes or deletes only those, what carries a test's tag or is in the test VPC. Beyond those, it writes under `import/` and `module-test/` in the bucket and the `/natkit/boot-test/*` parameters, and can tag any imported or copied snapshot in the account for release. `iam:PassRole` for the test profile and the `vmimport` role only |
+| `AWS_ROLE_ARN` (secret) | GitHub OIDC role, assumable only from `main` and `v*` tags. It imports and registers AMIs, makes a release's AMIs (tagged `natkit.io/release=natkit-v*`) public, turning the account's block public access for AMIs off for that and back on, and deletes the AMIs it tagged `natkit.io/release` that were never published (per-commit AMIs after each run, a release's whose tests failed once a higher one is out); a published release's AMIs stay. For the tests it creates instances, EIPs, ENIs, security groups and a launch template with a test's tag, and an Auto Scaling group and an alarm named `natkit-module-test-*`; it changes or deletes only those, what carries a test's tag or is in the test VPC. Beyond those, it writes under `import/` and `module-test/` in the bucket and the `/natkit/boot-test/*` parameters, and can tag any imported or copied snapshot in the account for release. `iam:PassRole` for the test profile and the `vmimport` role only |
 | `AWS_REGION` | the region for everything |
 | `NATKIT_BUCKET` | S3 bucket for image imports |
 | `NATKIT_TEST_PUBLIC_SUBNET` | subnet with an internet gateway route and an IPv6 CIDR (the module test always checks NAT64) |
