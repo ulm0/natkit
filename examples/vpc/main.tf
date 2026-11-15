@@ -24,9 +24,10 @@ module "vpc" {
   enable_nat_gateway = false # natkit instead
 }
 
-# natkit's AMI, imported into this account (Getting started), from the same release as the module
+# natkit's public AMI (us-east-1), from the same release as the module. Always by owner: anyone can register an AMI
+# with this name. In another Region, the one you imported: owners = ["self"]
 data "aws_ami" "natkit" {
-  owners = ["self"]
+  owners = ["208689161537"]
   filter {
     name   = "name"
     values = ["natkit-v0.1.5-arm64"]

@@ -4,8 +4,10 @@
 # Both roles change only the test VPC, what a test tagged and the module test's group and alarm (by name): the account
 # may hold other things (a production NAT, other VPCs), and a test script with a bug, or a tool in the job that was
 # tampered with, must not get to them. The exceptions: the bucket's import/ and module-test/ prefixes, the
-# /natkit/boot-test/* parameters, any imported or copied snapshot (TagSnapshot), and PutMetricData in the natkit
-# namespace, which production NATs use too: keep those in another account.
+# /natkit/boot-test/* parameters, any imported or copied snapshot (TagSnapshot), PutMetricData in the natkit
+# namespace, which production NATs use too (keep those in another account), and the account's block public access
+# for AMIs, which the release turns off for as long as it takes to make its own AMIs public.
+# Public sharing of snapshots is blocked outright (block-all-sharing): a public AMI doesn't need public snapshots.
 # Not created here: the account's GitHub OIDC provider, the S3 import bucket and the vmimport role (reuse yagan's).
 terraform {
   required_version = ">= 1.10"
@@ -143,6 +145,12 @@ resource "aws_iam_role" "github" {
     }]
   })
 }
+# Snapshots are never made public: a public AMI's stay private to this account. Blocked for every user of the
+# account, not just CI's roles.
+resource "aws_ebs_snapshot_block_public_access" "this" {
+  state = "block-all-sharing"
+}
+
 resource "aws_iam_role_policy" "github" {
   name = "natkit-ci"
   role = aws_iam_role.github.id
@@ -230,6 +238,22 @@ resource "aws_iam_role_policy" "github" {
         ]
         Resource  = ["${local.ec2_arn}:instance/*", "${local.ec2_arn}:elastic-ip/*", "${local.ec2_arn}:launch-template/*"]
         Condition = { StringLike = { "aws:ResourceTag/natkit.io/module-test" = "*" } }
+      },
+      # the release makes its AMIs public: a release's only (natkit-v<version>-<arch>), not a commit's or a pull
+      # request's. Block public access for AMIs is an account setting (no resource): the release unblocks it for that
+      # and blocks it again, and AMIs already public stay public either way.
+      {
+        Sid       = "PublishRelease"
+        Effect    = "Allow"
+        Action    = "ec2:ModifyImageAttribute"
+        Resource  = "${local.arn}:ec2:${local.region}::image/*"
+        Condition = { StringLike = { "aws:ResourceTag/natkit.io/release" = "natkit-v*" } }
+      },
+      {
+        Sid      = "ImageBlockPublicAccess"
+        Effect   = "Allow"
+        Action   = ["ec2:GetImageBlockPublicAccessState", "ec2:DisableImageBlockPublicAccess", "ec2:EnableImageBlockPublicAccess"]
+        Resource = "*"
       },
       # boot-cleanup prunes per-commit AMIs; only images/snapshots scripts/ami.sh tagged
       {

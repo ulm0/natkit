@@ -8,6 +8,18 @@ With the [OpenTofu module](/docs/deploy/opentofu/), a new AMI, new user-data or 
 
 Upgrade the module and the AMI together, from the same release. The module refuses an AMI that doesn't know the keys it sets: from v0.1.5 it sets `lifecycle_hook`, so it refuses the releases up to v0.1.3.
 
+## How long an AMI stays up
+
+A release's public AMIs stay up until three newer releases exist: when v0.1.8 comes out, v0.1.5's are deregistered. An instance already running from a deregistered AMI keeps running, but an Auto Scaling group can't launch from it any more: when its instance fails, or at the next instance refresh, it has no NAT to replace it with. Upgrade before then, or keep a copy of the AMI in your own account:
+
+```sh
+aws ec2 copy-image --region us-east-1 --source-region us-east-1 --source-image-id ami-... --name natkit-v0.1.5-arm64
+```
+
+A copy is yours, and its snapshot is yours to pay (see [Costs](/docs/operate/costs/#the-ami)).
+
+## Without the module
+
 Without the module, launch an instance from the new AMI in place of the old one; with an Auto Scaling group of your own, put the new AMI in its launch template and start an instance refresh.
 
 ## To v0.1.5

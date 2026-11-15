@@ -139,7 +139,9 @@ Every classic metric the [agent](/docs/operate/monitoring/#the-cloudwatch-agent)
 
 ## The AMI
 
-The AMIs aren't public: you [import the disk image](/docs/start/getting-started/#get-the-ami) into your own account, and the snapshot behind the AMI is yours to pay.
+natkit's [public AMI](/docs/start/getting-started/#get-the-ami) in us-east-1 costs you nothing: its snapshot is natkit's. Launching from it bills only the instance and its volume.
+
+In another Region you [import the disk image](/docs/start/getting-started/#in-another-region-or-to-keep-it) into your own account, and the snapshot behind that AMI is yours to pay:
 
 - A snapshot is billed for the data it holds, not for the volume's size. natkit's holds about 0.1 GB: about half a cent a month for each AMI you keep, in each Region.
 - Deregistering an AMI doesn't delete its snapshot. To stop paying, delete the snapshot too.
