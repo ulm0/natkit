@@ -3,7 +3,7 @@ export DOCKER_HOST ?= $(shell docker context inspect --format "{{.Endpoints.dock
 # bumping it rebuilds.
 LINUXKIT_REF := 0e34a007431a3a3c19a03fc6bca00fba51774706 # 2026-10-27
 LK := bin/linuxkit-$(shell echo $(LINUXKIT_REF) | cut -c1-12)
-GOLANG := golang:1.27.4-alpine3.24@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf
+GOLANG := golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280
 ALPINE := alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 REGISTRY := ghcr.io/ulm0/natkit
 # images natkit.yml uses; local builds tag these names, otherwise linuxkit pulls them from GHCR (CI pushes them)
