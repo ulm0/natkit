@@ -13,7 +13,7 @@ import (
 // /etc/cwagentconfig, the agent image's container config directory. Restarted if it exits.
 
 // agentImage: Renovate keeps it current (renovate.json, "CloudWatch agent, pulled at boot")
-const agentImage = "public.ecr.aws/cloudwatch-agent/cloudwatch-agent:1.300074.1b2005@sha256:f6ce19de7f57fe9c536eb01dbebfb4c997fa053fa891d02711858642dda8a3f4"
+const agentImage = "public.ecr.aws/cloudwatch-agent/cloudwatch-agent:1.300075.0b2061@sha256:982b213b6ce7ecbaa55d97c77075ca2badbb7a07e77f6979e1152fb0af3fc52b"
 
 const (
 	agentConf    = runDir + "/cwagent"
