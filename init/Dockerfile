@@ -1,5 +1,5 @@
 # natkit (natkit-init, natkit-metrics, natkit-cwagent): one static Go binary, the AWS SDK for Go v2 inside it
-FROM golang:1.27.4-alpine3.24@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS natkit
+FROM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS natkit
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
