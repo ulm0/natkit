@@ -96,7 +96,7 @@ type cloud interface {
 	heartbeat(ctx context.Context, group, hook, instance string) error
 	complete(ctx context.Context, group, hook, instance string) error
 	parameter(ctx context.Context, name string) (string, error) // decrypted
-	putMetrics(ctx context.Context, name string, exceeded, available float64) error
+	putMetrics(ctx context.Context, name string, report []metric) error
 }
 
 type sdkCloud struct {
@@ -248,17 +248,15 @@ func (s *sdkCloud) parameter(ctx context.Context, name string) (string, error) {
 	return aws.ToString(out.Parameter.Value), nil
 }
 
-func (s *sdkCloud) putMetrics(ctx context.Context, name string, exceeded, available float64) error {
+func (s *sdkCloud) putMetrics(ctx context.Context, name string, report []metric) error {
 	ctx, cancel := context.WithTimeout(ctx, shortTimeout)
 	defer cancel()
 	dim := []cwtypes.Dimension{{Name: aws.String(metricsDimKey), Value: aws.String(name)}}
-	_, err := s.cw.PutMetricData(ctx, &cloudwatch.PutMetricDataInput{
-		Namespace: aws.String(metricsName),
-		MetricData: []cwtypes.MetricDatum{
-			{MetricName: aws.String("conntrack_allowance_exceeded"), Value: aws.Float64(exceeded), Unit: cwtypes.StandardUnitCount, Dimensions: dim},
-			{MetricName: aws.String("conntrack_allowance_available"), Value: aws.Float64(available), Unit: cwtypes.StandardUnitCount, Dimensions: dim},
-		},
-	})
+	data := make([]cwtypes.MetricDatum, 0, len(report))
+	for _, m := range report {
+		data = append(data, cwtypes.MetricDatum{MetricName: aws.String(m.name), Value: aws.Float64(m.value), Unit: cwtypes.StandardUnitCount, Dimensions: dim})
+	}
+	_, err := s.cw.PutMetricData(ctx, &cloudwatch.PutMetricDataInput{Namespace: aws.String(metricsName), MetricData: data})
 	return apiError("PutMetricData", err)
 }
 

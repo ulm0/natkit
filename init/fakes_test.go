@@ -97,7 +97,8 @@ type fakeCloud struct {
 	paramErr       error
 	panicOn        string
 	metricsErr     []error
-	metrics        [][2]float64
+	metrics        [][2]float64 // conntrack_allowance_exceeded and _available of every report
+	reports        [][]metric
 }
 
 func newFakeCloud(md *fakeMetadata) *fakeCloud {
@@ -208,9 +209,19 @@ func (c *fakeCloud) parameter(_ context.Context, name string) (string, error) {
 	return v, nil
 }
 
-func (c *fakeCloud) putMetrics(_ context.Context, name string, exceeded, available float64) error {
+func (c *fakeCloud) putMetrics(_ context.Context, name string, report []metric) error {
 	c.record("PutMetricData " + name)
-	c.metrics = append(c.metrics, [2]float64{exceeded, available})
+	var ct [2]float64
+	for _, m := range report {
+		switch m.name {
+		case "conntrack_allowance_exceeded":
+			ct[0] = m.value
+		case "conntrack_allowance_available":
+			ct[1] = m.value
+		}
+	}
+	c.metrics = append(c.metrics, ct)
+	c.reports = append(c.reports, report)
 	return pop(&c.metricsErr)
 }
 

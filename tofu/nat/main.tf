@@ -41,6 +41,15 @@ variable "instance_type" {
   type        = string
   default     = "t4g.micro"
 }
+variable "cpu_credits" {
+  description = "Credit mode of a burstable (T-family) `instance_type`: `unlimited` or `standard`. Default: EC2's, the account's default for the family (`unlimited` on T4g, T3 and T3a unless changed). `standard` caps the cost: an instance out of credits is held to its baseline. natkit hasn't been measured in that mode. See [CPU credits](https://natkit.ulm0.com/docs/operate/costs/#cpu-credits)."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.cpu_credits == null || contains(["unlimited", "standard"], coalesce(var.cpu_credits, "-"))
+    error_message = "cpu_credits: unlimited or standard."
+  }
+}
 variable "eip" {
   description = "Allocate an EIP and have the instance take it. Otherwise it egresses from its own public IP, which changes on replacement."
   type        = bool
@@ -99,7 +108,7 @@ variable "cwagent_cfg_param_name" {
   default     = null
 }
 variable "conntrack_alarm_actions" {
-  description = "Alarm when EC2 drops packets because the instance's [connection-tracking allowance](https://natkit.ulm0.com/docs/operate/performance/) ran out, and when the NAT stops reporting, with these actions (SNS topic ARNs; `[]` for an alarm without any). natkit publishes the ENA driver's allowance counters itself ([`metrics`](https://natkit.ulm0.com/docs/operate/monitoring/#allowance-metrics)), without the CloudWatch agent. CloudWatch bills the two metrics, the requests and the alarm: see [Costs](https://natkit.ulm0.com/docs/operate/costs/)."
+  description = "Alarm when EC2 drops packets because the instance's [connection-tracking allowance](https://natkit.ulm0.com/docs/operate/performance/) ran out, and when the NAT stops reporting, with these actions (SNS topic ARNs; `[]` for an alarm without any). natkit publishes the ENA driver's allowance counters itself ([`metrics`](https://natkit.ulm0.com/docs/operate/monitoring/#allowance-metrics)), without the CloudWatch agent. CloudWatch bills the five metrics, the requests and the alarm: see [Costs](https://natkit.ulm0.com/docs/operate/costs/)."
   type        = list(string)
   default     = null
 }
@@ -329,6 +338,12 @@ resource "aws_launch_template" "this" {
   iam_instance_profile {
     name = var.instance_profile != null ? var.instance_profile : aws_iam_instance_profile.this[0].name
   }
+  dynamic "credit_specification" {
+    for_each = var.cpu_credits == null ? [] : [var.cpu_credits]
+    content {
+      cpu_credits = credit_specification.value
+    }
+  }
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
@@ -373,6 +388,11 @@ resource "aws_launch_template" "this" {
     precondition {
       condition     = var.cwagent_cfg_param_name == null || !endswith(var.instance_type, ".nano")
       error_message = "The CloudWatch agent (cwagent_cfg_param_name) needs 1 GiB of memory: use a micro or larger instance type."
+    }
+    # only burstable instances have a credit mode: a plan that fails, not a setting that means nothing
+    precondition {
+      condition     = var.cpu_credits == null || startswith(var.instance_type, "t")
+      error_message = "cpu_credits applies to burstable (T-family) instance types only: unset it for ${var.instance_type}."
     }
     # the metrics' dimension is the module's name, and natkit refuses a metrics value outside these characters at
     # boot: here it is a plan that fails, not a NAT that never comes up

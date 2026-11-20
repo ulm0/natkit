@@ -21,10 +21,11 @@ func TestParseEthtool(t *testing.T) {
      garbage
      conntrack_allowance_available: notanumber
 `)
-	if !c.haveExceeded || c.exceeded != 7 || !c.haveAvailable || c.available != 153909 {
+	want := map[string]uint64{"bw_in_allowance_exceeded": 412, "conntrack_allowance_exceeded": 7}
+	if !reflect.DeepEqual(c.exceeded, want) || !c.haveAvailable || c.available != 153909 {
 		t.Errorf("%+v", c)
 	}
-	if c := parseEthtool("no counters here\n"); c.haveExceeded || c.haveAvailable {
+	if c := parseEthtool("no counters here\n"); len(c.exceeded) > 0 || c.haveAvailable {
 		t.Errorf("%+v", c)
 	}
 }
@@ -53,7 +54,9 @@ func TestDropCounter(t *testing.T) {
 	}
 }
 
-// ethtoolLikeTest: test/ethtool's counters: exceeded grows with every call, by 3 on eth0 from 7 and by 2 on eth9
+// ethtoolLikeTest: test/ethtool's counters: bw_out_allowance_exceeded on eth0 only, growing by 4 from 0;
+// pps_allowance_exceeded on eth9 only, staying at 2; no bw_in_allowance_exceeded.
+// conntrack_allowance_exceeded grows with every call, by 3 on eth0 from 7 and by 2 on eth9
 // from 5; the lower available is eth9's, not the first interface's
 func ethtoolLikeTest() func(string, []string, string) (string, error) {
 	calls := map[string]int{}
@@ -72,7 +75,11 @@ func ethtoolLikeTest() func(string, []string, string) (string, error) {
 		}
 		n := calls[args[1]]
 		calls[args[1]]++
-		return fmt.Sprintf("     conntrack_allowance_exceeded: %d\n     conntrack_allowance_available: %d\n", from+by*n, left), nil
+		out := fmt.Sprintf("     conntrack_allowance_exceeded: %d\n     conntrack_allowance_available: %d\n", from+by*n, left)
+		if args[1] == "eth0" {
+			return out + fmt.Sprintf("     bw_out_allowance_exceeded: %d\n", 4*n), nil
+		}
+		return out + "     pps_allowance_exceeded: 2\n", nil
 	}
 }
 
@@ -89,7 +96,7 @@ func metricsHost(t *testing.T, name string) *fakeHost {
 func TestReadCounters(t *testing.T) {
 	h := metricsHost(t, "")
 	c := readCounters(h.host)
-	if !c.haveExceeded || c.exceeded != 12 || c.available != 1234 {
+	if c.exceeded["conntrack_allowance_exceeded"] != 12 || c.exceeded["pps_allowance_exceeded"] != 2 || c.available != 1234 {
 		t.Errorf("%+v", c)
 	}
 }
@@ -129,6 +136,12 @@ func TestMetrics(t *testing.T) {
 		}
 		if cl.calls[0] != "PutMetricData nat-a" {
 			t.Errorf("calls %v", cl.calls)
+		}
+		// the bandwidth and pps counters the same way, after conntrack's; one no interface has is left out
+		want := []metric{{"conntrack_allowance_exceeded", 5}, {"conntrack_allowance_available", 1234},
+			{"bw_out_allowance_exceeded", 4}, {"pps_allowance_exceeded", 0}}
+		if !reflect.DeepEqual(cl.reports[1], want) {
+			t.Errorf("report %v", cl.reports[1])
 		}
 	})
 	// regression: a failed report's drops were lost to the next one

@@ -4,37 +4,44 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// natkit-metrics (service): EC2's connection-tracking allowance counters to CloudWatch, only when natkit-init wrote
-// its config (user-data metrics). The ENA driver has them (ethtool -S): two numbers and one PutMetricData a cycle,
-// so no agent, and it runs on 0.5 GiB. Namespace natkit, dimension Name=<metrics>:
+// natkit-metrics (service): EC2's allowance counters to CloudWatch, only when natkit-init wrote its config (user-data
+// metrics). The ENA driver has them (ethtool -S): a few numbers and one PutMetricData a cycle, so no agent, and it
+// runs on 0.5 GiB. Namespace natkit, dimension Name=<metrics>:
 //
 //	conntrack_allowance_exceeded   packets EC2 dropped because the allowance ran out, since the last report: on any
 //	                               interface (EC2 counts a drop on the ENI the packet was on). Alarm on Sum > 0.
 //	conntrack_allowance_available  tracked connections left before it runs out (the instance's, the same on every ENI)
+//	bw_in_allowance_exceeded       packets EC2 queued or dropped because the instance went over its inbound
+//	bw_out_allowance_exceeded      bandwidth, outbound bandwidth or packets-per-second allowance, since the last
+//	pps_allowance_exceeded         report, on any interface: the instance type's network limits, not natkit's
 //
-// The first reading is where the counting starts: its report says 0 dropped, if it gets through. A report that fails
-// is not lost: the next one that gets through covers the time since the last one that did. That matters here,
-// because a report is a new connection too, and EC2 drops it like any other while the allowance is exhausted.
+// The first reading is where the counting starts: its report says 0, if it gets through. A report that fails is not
+// lost: the next one that gets through covers the time since the last one that did. That matters here, because a
+// report is a new connection too, and EC2 drops it like any other while the allowance is exhausted.
 
 const metricsInterval = 50 * time.Second // a cycle stays under a minute: no 1-minute period without a datapoint
 
-// counters: the ENA driver's conntrack allowance counters, summed (exceeded) or the lowest (available) over the
+// exceededNames: the ENA driver's "allowance exceeded" counters natkit reports. A driver with
+// conntrack_allowance_available has them all; one that is missing is left out of the report.
+var exceededNames = []string{"conntrack_allowance_exceeded", "bw_in_allowance_exceeded", "bw_out_allowance_exceeded", "pps_allowance_exceeded"}
+
+// counters: the ENA driver's allowance counters, the exceeded ones summed and available the lowest, over the
 // interfaces
 type counters struct {
-	exceeded      uint64
+	exceeded      map[string]uint64 // by name, only those found
 	available     uint64
-	haveExceeded  bool
 	haveAvailable bool
 }
 
 // parseEthtool: the counters in `ethtool -S` output (one interface's)
 func parseEthtool(out string) counters {
-	var c counters
+	c := counters{exceeded: map[string]uint64{}}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 {
@@ -44,15 +51,14 @@ func parseEthtool(out string) counters {
 		if err != nil {
 			continue
 		}
-		switch f[0] {
-		case "conntrack_allowance_exceeded:":
-			c.exceeded += n
-			c.haveExceeded = true
-		case "conntrack_allowance_available:":
+		k := strings.TrimSuffix(f[0], ":")
+		if k == "conntrack_allowance_available" {
 			if !c.haveAvailable || n < c.available {
 				c.available = n
 			}
 			c.haveAvailable = true
+		} else if slices.Contains(exceededNames, k) {
+			c.exceeded[k] += n
 		}
 	}
 	return c
@@ -60,16 +66,15 @@ func parseEthtool(out string) counters {
 
 // readCounters: the counters of every interface, added up
 func readCounters(h *host) counters {
-	var all counters
+	all := counters{exceeded: map[string]uint64{}}
 	for _, d := range h.glob("/sys/class/net/*") {
 		out, err := h.run("", "ethtool", "-S", path.Base(d))
 		if err != nil {
 			continue
 		}
 		c := parseEthtool(out)
-		if c.haveExceeded {
-			all.exceeded += c.exceeded
-			all.haveExceeded = true
+		for k, n := range c.exceeded {
+			all.exceeded[k] += n
 		}
 		if c.haveAvailable && (!all.haveAvailable || c.available < all.available) {
 			all.available = c.available
@@ -77,6 +82,12 @@ func readCounters(h *host) counters {
 		}
 	}
 	return all
+}
+
+// metric: one datum of a report, a Count
+type metric struct {
+	name  string
+	value float64
 }
 
 // dropCounter: the packets dropped since the last report that got through
@@ -102,17 +113,33 @@ type publisher struct {
 	md       metadata
 	newCloud func(region string) cloud
 	cl       cloud
-	drops    dropCounter
+	drops    map[string]*dropCounter // by counter name
 }
 
 // publish: one report; "" once it got through, else why not
 func (p *publisher) publish(ctx context.Context, name string) string {
 	// the counters first: a cycle that can't reach IMDS (the allowance exhausted) still sets where the counting starts
 	c := readCounters(p.h)
-	if !c.haveExceeded || !c.haveAvailable {
+	if _, ok := c.exceeded["conntrack_allowance_exceeded"]; !ok || !c.haveAvailable {
 		return "no conntrack_allowance counters on any interface"
 	}
-	dropped := p.drops.since(c.exceeded)
+	if p.drops == nil {
+		p.drops = map[string]*dropCounter{}
+	}
+	var report []metric
+	for _, k := range exceededNames {
+		sum, ok := c.exceeded[k]
+		if !ok {
+			continue
+		}
+		if p.drops[k] == nil {
+			p.drops[k] = &dropCounter{}
+		}
+		report = append(report, metric{k, float64(p.drops[k].since(sum))})
+		if k == "conntrack_allowance_exceeded" { // available second, where it has always been
+			report = append(report, metric{"conntrack_allowance_available", float64(c.available)})
+		}
+	}
 	if p.cl == nil {
 		ctx, cancel := context.WithTimeout(ctx, tokenTimeout)
 		region, err := p.md.region(ctx)
@@ -122,10 +149,12 @@ func (p *publisher) publish(ctx context.Context, name string) string {
 		}
 		p.cl = p.newCloud(region)
 	}
-	if err := p.cl.putMetrics(ctx, name, float64(dropped), float64(c.available)); err != nil {
+	if err := p.cl.putMetrics(ctx, name, report); err != nil {
 		return err.Error()
 	}
-	p.drops.reported(c.exceeded)
+	for k, sum := range c.exceeded {
+		p.drops[k].reported(sum)
+	}
 	return ""
 }
 
