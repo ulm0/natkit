@@ -15,7 +15,7 @@ They carry three tags every account sees (EC2's [shared tags](https://docs.aws.a
 
 | Tag | Value |
 |---|---|
-| `ec2:SharedTag/natkit.io/version` | the release, e.g. `v0.1.7` |
+| `ec2:SharedTag/natkit.io/version` | the release, e.g. `v0.1.8` |
 | `ec2:SharedTag/natkit.io/arch` | `arm64` or `amd64` |
 | `ec2:SharedTag/natkit.io/commit` | the commit it was built from |
 
@@ -23,7 +23,7 @@ Look them up by tag or by name, always with the owner: anyone can register an AM
 
 ```sh
 aws ec2 describe-images --region us-east-1 --owners 208689161537 \
-  --filters Name=tag:ec2:SharedTag/natkit.io/version,Values=v0.1.7 Name=tag:ec2:SharedTag/natkit.io/arch,Values=arm64 \
+  --filters Name=tag:ec2:SharedTag/natkit.io/version,Values=v0.1.8 Name=tag:ec2:SharedTag/natkit.io/arch,Values=arm64 \
   --query 'Images[0].ImageId' --output text
 ```
 
@@ -34,7 +34,7 @@ data "aws_ami" "natkit" {
   owners = ["208689161537"]
   filter {
     name   = "tag:ec2:SharedTag/natkit.io/version"
-    values = ["v0.1.7"]
+    values = ["v0.1.8"]
   }
   filter {
     name   = "tag:ec2:SharedTag/natkit.io/arch"
@@ -54,7 +54,7 @@ A release's AMIs are never removed. Two years after its creation AWS deprecates 
 Import a release's disk image into your own account and Region, or [build it](/docs/develop/building/):
 
 ```sh
-V=v0.1.7 ARCH=arm64 # or amd64
+V=v0.1.8 ARCH=arm64 # or amd64
 curl -fsSLO "https://github.com/ulm0/natkit/releases/download/$V/natkit-$V-$ARCH-efi.img.gz"
 gunzip "natkit-$V-$ARCH-efi.img.gz"
 AWS_REGION=us-east-1 NATKIT_BUCKET=my-import-bucket scripts/ami.sh "natkit-$V-$ARCH-efi.img" $ARCH "natkit-$V-$ARCH"

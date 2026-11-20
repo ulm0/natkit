@@ -154,13 +154,15 @@ run 'client_cidrs: [192.168.0.0/24]' "natkit-init
 
 echo "== metrics: the packets dropped since the last report, on every interface, go to CloudWatch under that name"
 # test/ethtool: eth0 and eth9 have the counters; the first cycle is where the counting starts (0), the second
-# reports the increase on both (3 + 2)
+# reports the increase on both (3 + 2). bw_out_allowance_exceeded (eth0's, +4) and pps_allowance_exceeded (eth9's, no
+# change) the same way; bw_in_allowance_exceeded, on no interface, is left out
 ENA=1 run 'metrics: nat-a' "ip link add eth9 type dummy
 	natkit-init
 	NATKIT_METRICS_CYCLES=2 natkit-metrics
 	grep -qx 'natkit-metrics: publishing to CloudWatch, namespace natkit, Name=nat-a' /tmp/console
-	[ \"\$($calls | yq -p json -o json -I0 '.[0]')\" = '{\"Action\":\"PutMetricData\",\"Namespace\":\"natkit\",\"MetricData.member.1.MetricName\":\"conntrack_allowance_exceeded\",\"MetricData.member.1.Value\":\"0\",\"MetricData.member.1.Unit\":\"Count\",\"MetricData.member.1.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.1.Dimensions.member.1.Value\":\"nat-a\",\"MetricData.member.2.MetricName\":\"conntrack_allowance_available\",\"MetricData.member.2.Value\":\"1234\",\"MetricData.member.2.Unit\":\"Count\",\"MetricData.member.2.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.2.Dimensions.member.1.Value\":\"nat-a\"}' ]
-	[ \"\$($calls | yq -p json -o json -I0 'map(.[\"MetricData.member.1.Value\"])')\" = '[\"0\",\"5\"]' ]"
+	[ \"\$($calls | yq -p json -o json -I0 '.[0]')\" = '{\"Action\":\"PutMetricData\",\"Namespace\":\"natkit\",\"MetricData.member.1.MetricName\":\"conntrack_allowance_exceeded\",\"MetricData.member.1.Value\":\"0\",\"MetricData.member.1.Unit\":\"Count\",\"MetricData.member.1.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.1.Dimensions.member.1.Value\":\"nat-a\",\"MetricData.member.2.MetricName\":\"conntrack_allowance_available\",\"MetricData.member.2.Value\":\"1234\",\"MetricData.member.2.Unit\":\"Count\",\"MetricData.member.2.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.2.Dimensions.member.1.Value\":\"nat-a\",\"MetricData.member.3.MetricName\":\"bw_out_allowance_exceeded\",\"MetricData.member.3.Value\":\"0\",\"MetricData.member.3.Unit\":\"Count\",\"MetricData.member.3.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.3.Dimensions.member.1.Value\":\"nat-a\",\"MetricData.member.4.MetricName\":\"pps_allowance_exceeded\",\"MetricData.member.4.Value\":\"0\",\"MetricData.member.4.Unit\":\"Count\",\"MetricData.member.4.Dimensions.member.1.Name\":\"Name\",\"MetricData.member.4.Dimensions.member.1.Value\":\"nat-a\"}' ]
+	[ \"\$($calls | yq -p json -o json -I0 'map(.[\"MetricData.member.1.Value\"])')\" = '[\"0\",\"5\"]' ]
+	[ \"\$($calls | yq -p json -o json -I0 '.[1] | [.[\"MetricData.member.3.Value\"], .[\"MetricData.member.4.Value\"]]')\" = '[\"4\",\"0\"]' ]"
 
 echo "== metrics: a report that fails is not lost: the next one covers it"
 # cycle 1 reads 12 (where the counting starts), cycle 2 reads 17 and fails, cycle 3 reads 22: 10 since cycle 1

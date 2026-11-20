@@ -30,12 +30,12 @@ data "aws_ami" "natkit" {
   owners = ["208689161537"]
   filter {
     name   = "name"
-    values = ["natkit-v0.1.7-arm64"]
+    values = ["natkit-v0.1.8-arm64"]
   }
 }
 
 module "nat" {
-  source = "../../tofu/nat" # outside this repository: "github.com/ulm0/natkit//tofu/nat?ref=v0.1.7"
+  source = "../../tofu/nat" # outside this repository: "github.com/ulm0/natkit//tofu/nat?ref=v0.1.8"
 
   vpc_id          = module.vpc.vpc_id
   subnet_id       = module.vpc.public_subnets[0]

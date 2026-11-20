@@ -31,6 +31,15 @@ With the AWS CLI, `describe-images --include-deprecated`.
 
 Without the module, launch an instance from the new AMI in place of the old one; with an Auto Scaling group of your own, put the new AMI in its launch template and start an instance refresh.
 
+## To v0.1.8
+
+From v0.1.7, with the module, moving to v0.1.8's AMI replaces the instance once, as any new AMI does. Nothing else changes unless you set the new input.
+
+- natkit's [allowance metrics](/docs/operate/monitoring/#allowance-metrics) now include `bw_in_allowance_exceeded`, `bw_out_allowance_exceeded` and `pps_allowance_exceeded`: packets EC2 queued or dropped because the instance went over its bandwidth or packets-per-second allowance. They go in the same request, under the same namespace and dimension, and need no new permission. The module's alarm still watches `conntrack_allowance_exceeded` only; [Monitoring](/docs/operate/monitoring/#alarms) has an example alarm on the new ones.
+- With `conntrack_alarm_actions` (or `metrics` in the user-data), CloudWatch now bills 5 custom metrics instead of 2: about $2.12 a month for each NAT instead of $1.22, with the alarm. See [Costs](/docs/operate/costs/#cloudwatch).
+- The module has a new input, `cpu_credits` (`unlimited` or `standard`). Unset, the default, nothing changes: EC2's default for the instance family applies. See [CPU credits](/docs/operate/costs/#cpu-credits).
+- New page: [From a NAT gateway](/docs/deploy/migrating/), to move from NAT gateways one zone at a time and keep their Elastic IPs.
+
 ## To v0.1.7
 
 v0.1.6 was tagged but not released: its build failed, and v0.1.7 fixes the cause. From v0.1.5, nothing changes on a running NAT: the same settings, console lines and behaviour. With the module, moving to v0.1.7's AMI replaces the instance once, as any new AMI does.

@@ -307,7 +307,7 @@ func TestSDKSSM(t *testing.T) {
 func TestSDKCloudWatch(t *testing.T) {
 	s := newAWSServer(t)
 	cl, _ := s.cloud()
-	if err := cl.putMetrics(context.Background(), "nat-a", 5, 1234); err != nil {
+	if err := cl.putMetrics(context.Background(), "nat-a", []metric{{"conntrack_allowance_exceeded", 5}, {"conntrack_allowance_available", 1234}, {"pps_allowance_exceeded", 3}}); err != nil {
 		t.Fatal(err)
 	}
 	r := s.last()
@@ -329,7 +329,7 @@ func TestSDKCloudWatch(t *testing.T) {
 			t.Errorf("datum %#v", d)
 		}
 	}
-	if !reflect.DeepEqual(got, map[string]float64{"conntrack_allowance_exceeded": 5, "conntrack_allowance_available": 1234}) {
+	if !reflect.DeepEqual(got, map[string]float64{"conntrack_allowance_exceeded": 5, "conntrack_allowance_available": 1234, "pps_allowance_exceeded": 3}) {
 		t.Errorf("metrics %v", got)
 	}
 }
@@ -358,7 +358,7 @@ func TestSDKErrors(t *testing.T) {
 	}{
 		{cl.attach(ctx, testIID, testStaticENI), "AttachNetworkInterface: HTTP 400 InvalidParameterValue: Network interface 'eni-0b' is currently in use."},
 		{cl.complete(ctx, "g", "h", testIID), "CompleteLifecycleAction: HTTP 403 AccessDenied: not authorized"},
-		{cl.putMetrics(ctx, "nat-a", 0, 1), "PutMetricData: HTTP 500 InternalFailure: try again"},
+		{cl.putMetrics(ctx, "nat-a", []metric{{"conntrack_allowance_exceeded", 0}}), "PutMetricData: HTTP 500 InternalFailure: try again"},
 	} {
 		if tc.err == nil || tc.err.Error() != tc.want {
 			t.Errorf("%v, want %q", tc.err, tc.want)
@@ -370,7 +370,7 @@ func TestSDKErrors(t *testing.T) {
 	dead.Close()
 	c := s.config()
 	c.cloudwatch = u
-	err := newCloud(c, "us-east-1", newIMDS(s.srv.URL)).putMetrics(ctx, "nat-a", 0, 1)
+	err := newCloud(c, "us-east-1", newIMDS(s.srv.URL)).putMetrics(ctx, "nat-a", []metric{{"conntrack_allowance_exceeded", 0}})
 	if err == nil || !strings.HasPrefix(err.Error(), "PutMetricData: Post \"") || !strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "\n") {
 		t.Errorf("transport error %q", err)
 	}
@@ -441,7 +441,7 @@ func TestNoInstanceRole(t *testing.T) {
 	}{
 		{cl.sourceDestCheckOff(ctx, testENI), "ModifyNetworkInterfaceAttribute"},
 		{ssmErr, "GetParameter"},
-		{cl.putMetrics(ctx, "nat-a", 0, 1), "PutMetricData"},
+		{cl.putMetrics(ctx, "nat-a", []metric{{"conntrack_allowance_exceeded", 0}}), "PutMetricData"},
 	} {
 		if want := tc.action + ": no instance role credentials (an instance profile?): HTTP 404"; tc.err == nil || tc.err.Error() != want {
 			t.Errorf("%v, want %q", tc.err, want)

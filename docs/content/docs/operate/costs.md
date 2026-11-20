@@ -19,7 +19,7 @@ One NAT from the [OpenTofu module](/docs/deploy/opentofu/), before any traffic. 
 | Root volume | $0.08 | $0.08 | $0.08 |
 | Public IPv4 address (the EIP) | $3.65 | $3.65 | $3.65 |
 | **Total** | **$9.86** | **$6.80** | **$7.53** |
-| **With the allowance metrics and alarm** (`conntrack_alarm_actions`, $1.22) | **$11.08** | **$8.02** | **$8.75** |
+| **With the allowance metrics and alarm** (`conntrack_alarm_actions`, $2.12) | **$11.98** | **$8.92** | **$9.65** |
 
 Add [data transfer](#data-transfer) for what the NAT sends to the internet, and [surplus CPU credits](#cpu-credits) if the instance stays busy.
 
@@ -33,7 +33,7 @@ Add [data transfer](#data-transfer) for what the NAT sends to the internet, and 
 | Surplus CPU credits | when the CPU stays above the baseline, and when a busy instance is terminated | $0.04 per vCPU-hour on T4g, $0.05 on T3 and T3a | $0 if it doesn't |
 | Data transfer out to the internet | per GB the NAT sends out | $0.09 per GB | by traffic |
 | Data transfer between Availability Zones | per GB, when a client is in another zone than the NAT | $0.01 per GB at each end | by traffic |
-| Allowance metrics and alarm (optional) | while they are published | 2 metrics, 1 alarm, the requests | $1.22 |
+| Allowance metrics and alarm (optional) | while they are published | 5 metrics, 1 alarm, the requests | $2.12 |
 | CloudWatch agent (optional) | per metric it publishes | $0.30 per metric | by its config |
 | The AMI's snapshot | while the snapshot exists | $0.05 per GB-month | about $0.005 |
 
@@ -72,7 +72,7 @@ AWS charges $0.005 an hour for every public IPv4 address it provides, in use or 
 
 ## CPU credits
 
-T4g, T3 and T3a are burstable instance types. Each has a CPU baseline, and each launches in `unlimited` mode by default; the module doesn't change that. Above the baseline the instance keeps its full speed and spends surplus credits. AWS bills surplus credits in two cases, described in [its documentation](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-performance-instances-unlimited-mode-concepts.html):
+T4g, T3 and T3a are burstable instance types. Each has a CPU baseline, and each launches in `unlimited` mode by default; the module doesn't change that unless you set `cpu_credits`. Above the baseline the instance keeps its full speed and spends surplus credits. AWS bills surplus credits in two cases, described in [its documentation](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-performance-instances-unlimited-mode-concepts.html):
 
 - the instance has spent more than it can earn back in 24 hours;
 - the instance is stopped or terminated while it still owes some. A replacement terminates the old instance, so whatever it owes is billed then: at most $0.10 on a `t4g.nano`, $0.19 on a `t4g.micro`, $0.12 on a `t3.nano` and $0.24 on a `t3.micro`.
@@ -91,7 +91,15 @@ These amounts come on top of the instance price. The last column is the most an 
 How much traffic keeps an instance above its baseline hasn't been measured. Watch it instead: EC2 publishes `CPUSurplusCreditsCharged` for the instance, at no charge. It should stay at zero.
 
 - A larger instance doesn't make the CPU cheaper on T4g and T3: the next size up doubles the baseline for about the price of the surplus credits it saves.
-- To cap the cost, use `standard` mode: an instance that runs out of credits is held to its baseline, so the NAT slows down instead of costing more. natkit hasn't been tested in that mode, and the module has no input for it. For a running instance: `aws ec2 modify-instance-credit-specification --instance-credit-specification "InstanceId=<id>,CpuCredits=standard"`. Its replacement launches in `unlimited` mode again, unless the account's default for the instance family is changed with `aws ec2 modify-default-credit-specification`, which applies to every new instance of that family in the Region.
+- To cap the cost, use `standard` mode: an instance that runs out of credits is held to its baseline, so the NAT slows down instead of costing more. With the module, set `cpu_credits`:
+
+  ```hcl
+  cpu_credits = "standard" # or "unlimited"; unset, EC2's default for the instance family
+  ```
+
+  It goes into the launch template, so every replacement launches in that mode too. Changing it replaces the instance, like any change to the launch template. The module refuses it for an instance type outside the T family.
+- natkit hasn't been measured in `standard` mode. What happens to forwarding, the [handover](/docs/how-it-works/high-availability/) and the [allowance metrics](/docs/operate/monitoring/#allowance-metrics) once the credits run out is not known yet. Before you rely on it, watch `CPUCreditBalance` in a test, and the NAT's own traffic once it reaches zero.
+- Without the module, for a running instance: `aws ec2 modify-instance-credit-specification --instance-credit-specification "InstanceId=<id>,CpuCredits=standard"`. A replacement launches in the mode of its launch template, or in the account's default for the instance family, which `aws ec2 modify-default-credit-specification` changes for every new instance of that family in the Region.
 
 ## Data transfer
 
@@ -118,14 +126,14 @@ With `conntrack_alarm_actions`, natkit publishes the [allowance counters](/docs/
 
 | | Price | A month |
 |---|---|---|
-| 2 custom metrics | $0.30 each | $0.60 |
+| 5 custom metrics | $0.30 each | $1.50 |
 | 1 alarm on one metric | $0.10 | $0.10 |
 | `PutMetricData`: one request about every 50 seconds, about 52 000 a month | $0.01 per 1 000 | $0.52 |
-| **Total** | | **$1.22** |
+| **Total** | | **$2.12** |
 
 - Metrics are billed by the hour, and only for the hours in which data arrives.
 - The metrics carry the module's `name`, not the instance ID. A replacement instance doesn't create new ones.
-- With one NAT per zone, each NAT has its own name and its own $1.22.
+- With one NAT per zone, each NAT has its own name and its own $2.12.
 - What the alarm notifies, such as an SNS topic, is billed separately.
 
 ### The CloudWatch agent
@@ -179,7 +187,7 @@ A NAT gateway costs $0.045 an hour ($32.85 a month), plus its public IPv4 addres
 
 The figures above leave these out:
 
-- **CloudWatch:** 10 custom metrics, 10 alarm metrics and 1 million API requests a month are free, and that doesn't expire. It is free once per account, or once per organization when the accounts share a bill. One NAT's allowance metrics and alarm use 2 metrics, 1 alarm metric and about 52 000 requests of it.
+- **CloudWatch:** 10 custom metrics, 10 alarm metrics and 1 million API requests a month are free, and that doesn't expire. It is free once per account, or once per organization when the accounts share a bill. One NAT's allowance metrics and alarm use 5 metrics, 1 alarm metric and about 52 000 requests of it.
 - **Data transfer:** the first 100 GB a month sent to the internet is free, counted across all services and Regions, per account or organization.
 - **Savings Plans and Reserved Instances** lower only the instance's hourly price. The volume, the public IPv4 address, surplus credits, data transfer and CloudWatch stay at list price.
 
