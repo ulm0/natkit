@@ -19,13 +19,13 @@ Docs: [natkit.ulm0.com](https://natkit.ulm0.com).
 
 ## Usage
 
-The AMIs are public in us-east-1, owned by account `208689161537`, named `natkit-<version>-arm64` and
+The AMIs are public in us-east-1, owned by account `846227790340`, named `natkit-<version>-arm64` and
 `natkit-<version>-amd64`, and tagged `ec2:SharedTag/natkit.io/version` (`v0.1.8`) and
 `ec2:SharedTag/natkit.io/arch` (`arm64`, `amd64`), plus `ec2:SharedTag/natkit.io/commit` (the source commit); each [release](https://github.com/ulm0/natkit/releases) lists their
 IDs. Look them up by tag or name, always with the owner: anyone can register an AMI with the same name or tags.
 
 ```sh
-aws ec2 describe-images --region us-east-1 --owners 208689161537 \
+aws ec2 describe-images --region us-east-1 --owners 846227790340 \
   --filters Name=tag:ec2:SharedTag/natkit.io/version,Values=v0.1.8 Name=tag:ec2:SharedTag/natkit.io/arch,Values=arm64 \
   --query 'Images[0].ImageId' --output text
 ```
@@ -105,7 +105,7 @@ module "nat" {
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-v0.1.8-arm64 (public in us-east-1, owner 208689161537): the same release as the module
+  ami_id          = "ami-..." # natkit-v0.1.8-arm64 (public in us-east-1, owner 846227790340): the same release as the module
   settings        = { nf_conntrack_max = "262144" }
 }
 ```

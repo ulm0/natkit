@@ -18,7 +18,7 @@ module "nat" {
   vpc_id          = aws_vpc.main.id
   subnet_id       = aws_subnet.public.id
   route_table_ids = [aws_route_table.private.id]
-  ami_id          = "ami-..." # natkit-v0.1.8-arm64 (public in us-east-1, owner 208689161537): the same release as the module
+  ami_id          = "ami-..." # natkit-v0.1.8-arm64 (public in us-east-1, owner 846227790340): the same release as the module
   instance_type   = "t4g.micro"
   settings        = { nf_conntrack_max = "262144" }
 }

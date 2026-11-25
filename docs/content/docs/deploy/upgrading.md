@@ -16,7 +16,7 @@ AWS deprecates every public AMI two years after it's created (v0.1.5's in Novemb
 
 ```hcl
 data "aws_ami" "natkit" {
-  owners             = ["208689161537"]
+  owners             = ["846227790340"]
   include_deprecated = true # still found after its deprecation date
   filter {
     name   = "name"
@@ -46,7 +46,7 @@ v0.1.6 was tagged but not released: its build failed, and v0.1.7 fixes the cause
 
 - An AWS call whose answer arrived within microseconds could fail after AWS had carried it out (a race in the AWS SDK's HTTP layer, seen against the test mock only). natkit tries the call again, but an attach or a lifecycle hook's completion can't be done twice. natkit now sends its requests so that it can't happen.
 
-- The AMIs are public in us-east-1 (owner `208689161537`), tagged `ec2:SharedTag/natkit.io/version`, `/arch` and `/commit`: an AMI you imported yourself there can go. Look the public one up with the owner.
+- The AMIs are public in us-east-1 (owner `846227790340`), tagged `ec2:SharedTag/natkit.io/version`, `/arch` and `/commit`: an AMI you imported yourself there can go. Look the public one up with the owner.
 - A published release's AMIs are never removed. Past AWS's two-year deprecation, look them up with `include_deprecated = true`.
 
 ## To v0.1.5
