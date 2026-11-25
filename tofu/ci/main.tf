@@ -8,7 +8,8 @@
 # namespace, which production NATs use too (keep those in another account), and the account's block public access
 # for AMIs, which the release turns off for as long as it takes to make its own AMIs public.
 # Public sharing of snapshots is blocked outright (block-all-sharing): a public AMI doesn't need public snapshots.
-# Not created here: the account's GitHub OIDC provider, the S3 import bucket and the vmimport role (reuse yagan's).
+# Not created here: the account's GitHub OIDC provider, the S3 bucket and the vmimport role. tofu/bootstrap makes them in a fresh
+# account (its outputs are this stack's oidc_provider_arn and bucket); an account that has them already (yagan's) reuses them.
 terraform {
   required_version = ">= 1.10"
   # bucket, key and region come from `init -backend-config=backend.tfvars` (gitignored)

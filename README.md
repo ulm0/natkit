@@ -184,7 +184,22 @@ instance with its root in memory and the allowance metrics. Then
 `scripts/module-test.sh` applies `tofu/nat` (arm64): the handover's time without egress, a replacement that fails,
 the conntrack alarm's metric, `client_cidrs`, `untracked`, the idle timeout, and NAT64 at every stage.
 `tofu/ci` creates the role, test VPC and instance profile and outputs these repository variables (set `AWS_ROLE_ARN` as a secret
-instead: it holds the account ID, and the run logs are public):
+instead: it holds the account ID, and the run logs are public). A fresh AWS account first needs what `tofu/ci` takes as inputs
+(the GitHub OIDC provider, the S3 bucket, the `vmimport` role): `tofu/bootstrap` creates them. In this order, with administrator
+credentials and `AWS_REGION` set to the region the AMIs are built in (nothing here is applied by CI):
+
+```sh
+cd tofu/bootstrap
+tofu init && tofu apply                                   # local state: keep terraform.tfstate
+tofu output -raw ci_backend_config > ../ci/backend.tfvars  # the bucket, for tofu/ci's own state
+cd ../ci
+tofu init -backend-config=backend.tfvars
+tofu apply \
+  -var "oidc_provider_arn=$(tofu -chdir=../bootstrap output -raw oidc_provider_arn)" \
+  -var "bucket=$(tofu -chdir=../bootstrap output -raw bucket)" \
+  -var 'github_subjects=["repo:<owner>/natkit:ref:refs/heads/main","repo:<owner>/natkit:ref:refs/tags/v*"]'
+tofu output repo_variables     # then: gh secret set AWS_ROLE_ARN -R <owner>/natkit, gh variable set NAME -b VALUE -R <owner>/natkit
+```
 
 | Variable | |
 |---|---|
