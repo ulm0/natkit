@@ -192,12 +192,16 @@ credentials and `AWS_REGION` set to the region the AMIs are built in (nothing he
 cd tofu/bootstrap
 tofu init && tofu apply                                   # local state: keep terraform.tfstate
 tofu output -raw ci_backend_config > ../ci/backend.tfvars  # the bucket, for tofu/ci's own state
+# the subject GitHub puts in the OIDC token: the repo's "sub_claim_prefix". A repository that uses GitHub's immutable
+# subject (ulm0/natkit does) has repo:<owner>@<owner id>/natkit@<repo id>, not repo:<owner>/natkit, and a role that names the
+# plain form is refused ("Not authorized to perform sts:AssumeRoleWithWebIdentity")
+gh api repos/ulm0/natkit/actions/oidc/customization/sub --jq .sub_claim_prefix   # repo:ulm0@13160093/natkit@1455680166
 cd ../ci
 tofu init -backend-config=backend.tfvars
 tofu apply \
   -var "oidc_provider_arn=$(tofu -chdir=../bootstrap output -raw oidc_provider_arn)" \
   -var "bucket=$(tofu -chdir=../bootstrap output -raw bucket)" \
-  -var 'github_subjects=["repo:<owner>/natkit:ref:refs/heads/main","repo:<owner>/natkit:ref:refs/tags/v*"]'
+  -var 'github_subjects=["repo:ulm0@13160093/natkit@1455680166:ref:refs/heads/main","repo:ulm0@13160093/natkit@1455680166:ref:refs/tags/v*"]'
 tofu output repo_variables     # then: gh secret set AWS_ROLE_ARN -R <owner>/natkit, gh variable set NAME -b VALUE -R <owner>/natkit
 ```
 
