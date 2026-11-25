@@ -13,7 +13,10 @@
 #   release on v* tags, once both AMIs pass: the AMIs are made public (launch permission for all accounts, in
 #           AWS_REGION only), the GitHub release; a published release's AMIs are never deregistered, only those of a
 #           lower release that never went public (its tests failed)
-# Repo secret: AWS_ROLE_ARN (GitHub OIDC role; a secret so the account ID stays out of the public logs).
+#   mirror  on v* tags, once the release is out: tofu/nat at the root of ulm0/terraform-aws-natkit, tagged the same, for
+#           the OpenTofu registry (scripts/mirror.sh)
+# Repo secrets: AWS_ROLE_ARN (GitHub OIDC role; a secret so the account ID stays out of the public logs),
+# MIRROR_DEPLOY_KEY (private half of a deploy key with write access on ulm0/terraform-aws-natkit only).
 # Repo variables: AWS_REGION, NATKIT_BUCKET, NATKIT_TEST_PUBLIC_SUBNET,
 # NATKIT_TEST_PRIVATE_SUBNET, NATKIT_TEST_INSTANCE_PROFILE.
 name: build
@@ -438,3 +441,28 @@ jobs:
             echo "deregistering $ami ($name, never published) and its snapshots"
             aws ec2 deregister-image --image-id "$ami" --delete-associated-snapshots >/dev/null
           done
+
+  # The OpenTofu registry wants the module at the root of a repository named terraform-aws-natkit. The deploy key
+  # can write that repository and nothing else; this job's token can only read natkit.
+  mirror:
+    needs: release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: tofu/nat to ulm0/terraform-aws-natkit, tagged ${{ github.ref_name }}
+        env:
+          MIRROR_DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          key="$RUNNER_TEMP/mirror-key" hosts="$RUNNER_TEMP/known_hosts"
+          (umask 077 && printf '%s\n' "$MIRROR_DEPLOY_KEY" >"$key")
+          # GitHub's host key (api.github.com/meta), pinned: no trust on first use
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >"$hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$hosts"
+          scripts/mirror.sh "$TAG"
