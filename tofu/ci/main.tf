@@ -72,7 +72,7 @@ locals {
 # ---- test network: a public subnet and a private one with its own route table, IPv4 + IPv6, one AZ
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "6.8.0"
+  version = "6.9.0"
 
   name            = var.name
   cidr            = var.cidr
