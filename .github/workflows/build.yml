@@ -182,7 +182,7 @@ jobs:
       - run: |
           tofu fmt -check -recursive -diff tofu test/module examples
           export TF_PLUGIN_CACHE_DIR="$RUNNER_TEMP/tofu-plugins" && mkdir -p "$TF_PLUGIN_CACHE_DIR"
-          for d in tofu/nat tofu/ci test/module examples/vpc; do
+          for d in tofu/nat tofu/ci tofu/bootstrap test/module examples/vpc; do
             tofu -chdir="$d" init -backend=false -input=false >/dev/null
             tofu -chdir="$d" validate
           done
