@@ -1,8 +1,8 @@
 # What a fresh AWS account needs before tofu/ci can be applied, and before CI can import an image: the account's GitHub OIDC
 # provider, the S3 bucket (image imports under import/, the module test's state under module-test/, and tofu/ci's own state), and
-# the vmimport service role that VM Import/Export assumes to read the image from that bucket. Apply this stack once, by hand,
+# the vmimport service role that VM Import/Export assumes to read the image from that bucket, and the Auto Scaling service-linked role. Apply this stack once, by hand,
 # with administrator credentials; its own state is a local file (terraform.tfstate here, gitignored): it makes the bucket every
-# other stack keeps its state in, so it cannot keep its own there. Keep that file (or import the three resources again).
+# other stack keeps its state in, so it cannot keep its own there. Keep that file (or import the resources again).
 # An account that already has the OIDC provider or the vmimport role (another project's) imports them instead of creating them:
 #   tofu import aws_iam_openid_connect_provider.github arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com
 #   tofu import aws_iam_role.vmimport vmimport
@@ -162,6 +162,14 @@ resource "aws_iam_role_policy" "vmimport" {
       { Sid = "MakeSnapshotAndImage", Effect = "Allow", Action = ["ec2:ModifySnapshotAttribute", "ec2:CopySnapshot", "ec2:RegisterImage", "ec2:Describe*"], Resource = "*" },
     ]
   })
+}
+
+# ---- the Auto Scaling service-linked role. The module test's Auto Scaling group makes AWS create it on first use, and the CI role
+# (rightly) may not iam:CreateServiceLinkedRole: in a fresh account the first group fails with AccessDenied. One per account: an
+# account that has it already (any account that ever used Auto Scaling) imports it instead:
+#   tofu import aws_iam_service_linked_role.autoscaling arn:aws:iam::<account>:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling
+resource "aws_iam_service_linked_role" "autoscaling" {
+  aws_service_name = "autoscaling.amazonaws.com"
 }
 
 output "oidc_provider_arn" {
