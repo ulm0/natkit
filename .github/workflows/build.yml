@@ -462,6 +462,7 @@ jobs:
         run: |
           key="$RUNNER_TEMP/mirror-key" hosts="$RUNNER_TEMP/known_hosts"
           (umask 077 && printf '%s\n' "$MIRROR_DEPLOY_KEY" >"$key")
+          unset MIRROR_DEPLOY_KEY # the key file is enough: keep the secret out of the env of mirror.sh, git and ssh
           # GitHub's host key (api.github.com/meta), pinned: no trust on first use
           echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >"$hosts"
           export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$hosts"
