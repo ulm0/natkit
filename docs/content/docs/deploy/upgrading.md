@@ -16,7 +16,7 @@ AWS deprecates every public AMI two years after it's created (v0.1.5's in Novemb
 
 ```hcl
 data "aws_ami" "natkit" {
-  owners             = ["208689161537"]
+  owners             = ["846227790340"]
   include_deprecated = true # still found after its deprecation date
   filter {
     name   = "name"
@@ -30,6 +30,13 @@ With the AWS CLI, `describe-images --include-deprecated`.
 ## Without the module
 
 Without the module, launch an instance from the new AMI in place of the old one; with an Auto Scaling group of your own, put the new AMI in its launch template and start an instance refresh.
+
+## To v0.1.9
+
+Nothing changes in natkit itself: the module, natkit-init and the settings are those of v0.1.8. What changes is where the AMIs come from: v0.1.9 and later are published from account `846227790340`, and releases up to v0.1.8 came from `208689161537`, which is being retired. With the module, moving to v0.1.9's AMI replaces the instance once, as any new AMI does.
+
+- Look the AMI up with the new owner: `owners = ["846227790340"]` in an `aws_ami` data source, `--owners 846227790340` in the CLI (see [Get the AMI](/docs/start/getting-started/#get-the-ami)). A lookup that still names `208689161537` finds v0.1.8 and older, never v0.1.9.
+- v0.1.8's AMIs stay where they are for now; a published release's AMIs are not deregistered, but the old account is going away, so move to v0.1.9.
 
 ## To v0.1.8
 
@@ -46,7 +53,7 @@ v0.1.6 was tagged but not released: its build failed, and v0.1.7 fixes the cause
 
 - An AWS call whose answer arrived within microseconds could fail after AWS had carried it out (a race in the AWS SDK's HTTP layer, seen against the test mock only). natkit tries the call again, but an attach or a lifecycle hook's completion can't be done twice. natkit now sends its requests so that it can't happen.
 
-- The AMIs are public in us-east-1 (owner `208689161537`), tagged `ec2:SharedTag/natkit.io/version`, `/arch` and `/commit`: an AMI you imported yourself there can go. Look the public one up with the owner.
+- The AMIs are public in us-east-1 (owner `846227790340`), tagged `ec2:SharedTag/natkit.io/version`, `/arch` and `/commit`: an AMI you imported yourself there can go. Look the public one up with the owner.
 - A published release's AMIs are never removed. Past AWS's two-year deprecation, look them up with `include_deprecated = true`.
 
 ## To v0.1.5

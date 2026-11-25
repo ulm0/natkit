@@ -9,21 +9,23 @@ natkit runs from its public AMI in us-east-1, or one you import into your own ac
 
 ## Get the AMI
 
-The AMIs are public in **us-east-1**, owned by account `208689161537`: `natkit-<version>-arm64` and `natkit-<version>-amd64`. Each [release](https://github.com/ulm0/natkit/releases) lists their IDs.
+The AMIs are public in **us-east-1**, owned by account `846227790340`: `natkit-<version>-arm64` and `natkit-<version>-amd64`. Each [release](https://github.com/ulm0/natkit/releases) lists their IDs.
+
+Releases up to v0.1.8 were published from account `208689161537`, which is being retired; use v0.1.9 or later, owned by `846227790340`.
 
 They carry three tags every account sees (EC2's [shared tags](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html#sharing-tags)):
 
 | Tag | Value |
 |---|---|
-| `ec2:SharedTag/natkit.io/version` | the release, e.g. `v0.1.8` |
+| `ec2:SharedTag/natkit.io/version` | the release, e.g. `v0.1.9` |
 | `ec2:SharedTag/natkit.io/arch` | `arm64` or `amd64` |
 | `ec2:SharedTag/natkit.io/commit` | the commit it was built from |
 
 Look them up by tag or by name, always with the owner: anyone can register an AMI with the same name or the same tags.
 
 ```sh
-aws ec2 describe-images --region us-east-1 --owners 208689161537 \
-  --filters Name=tag:ec2:SharedTag/natkit.io/version,Values=v0.1.8 Name=tag:ec2:SharedTag/natkit.io/arch,Values=arm64 \
+aws ec2 describe-images --region us-east-1 --owners 846227790340 \
+  --filters Name=tag:ec2:SharedTag/natkit.io/version,Values=v0.1.9 Name=tag:ec2:SharedTag/natkit.io/arch,Values=arm64 \
   --query 'Images[0].ImageId' --output text
 ```
 
@@ -31,10 +33,10 @@ In OpenTofu:
 
 ```hcl
 data "aws_ami" "natkit" {
-  owners = ["208689161537"]
+  owners = ["846227790340"]
   filter {
     name   = "tag:ec2:SharedTag/natkit.io/version"
-    values = ["v0.1.8"]
+    values = ["v0.1.9"]
   }
   filter {
     name   = "tag:ec2:SharedTag/natkit.io/arch"
@@ -54,7 +56,7 @@ A release's AMIs are never removed. Two years after its creation AWS deprecates 
 Import a release's disk image into your own account and Region, or [build it](/docs/develop/building/):
 
 ```sh
-V=v0.1.8 ARCH=arm64 # or amd64
+V=v0.1.9 ARCH=arm64 # or amd64
 curl -fsSLO "https://github.com/ulm0/natkit/releases/download/$V/natkit-$V-$ARCH-efi.img.gz"
 gunzip "natkit-$V-$ARCH-efi.img.gz"
 AWS_REGION=us-east-1 NATKIT_BUCKET=my-import-bucket scripts/ami.sh "natkit-$V-$ARCH-efi.img" $ARCH "natkit-$V-$ARCH"

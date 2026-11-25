@@ -27,15 +27,15 @@ module "vpc" {
 # natkit's public AMI (us-east-1), from the same release as the module. Always by owner: anyone can register an AMI
 # with this name. In another Region, the one you imported: owners = ["self"]
 data "aws_ami" "natkit" {
-  owners = ["208689161537"]
+  owners = ["846227790340"]
   filter {
     name   = "name"
-    values = ["natkit-v0.1.8-arm64"]
+    values = ["natkit-v0.1.9-arm64"]
   }
 }
 
 module "nat" {
-  source = "../../tofu/nat" # outside this repository: "github.com/ulm0/natkit//tofu/nat?ref=v0.1.8"
+  source = "../../tofu/nat" # outside this repository: "github.com/ulm0/natkit//tofu/nat?ref=v0.1.9"
 
   vpc_id          = module.vpc.vpc_id
   subnet_id       = module.vpc.public_subnets[0]

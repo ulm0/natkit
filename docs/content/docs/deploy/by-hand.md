@@ -6,7 +6,7 @@ weight: 30
 
 Without the [OpenTofu module](/docs/deploy/opentofu/), launch the AMI yourself:
 
-1. Launch the AMI in a public subnet with a public IP. Pick `natkit-<version>-arm64` or `natkit-<version>-amd64` to match the instance type: in us-east-1 the [public one](/docs/start/getting-started/#get-the-ami), owner `208689161537`.
+1. Launch the AMI in a public subnet with a public IP. Pick `natkit-<version>-arm64` or `natkit-<version>-amd64` to match the instance type: in us-east-1 the [public one](/docs/start/getting-started/#get-the-ami), owner `846227790340`.
 2. Turn off source/dest check on its ENI. With [`eni_id`](/docs/reference/configuration/), natkit turns off the primary ENI's; create the static ENI with source/dest check off, since natkit doesn't change it.
 3. Point the private subnets' default route at it, as you would for fck-nat.
 
