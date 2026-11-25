@@ -36,7 +36,7 @@ For each zone, in turn:
 
    ```hcl
    module "nat_a" {
-     source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.8"
+     source          = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.9"
      name            = "nat-a"
      vpc_id          = aws_vpc.main.id
      subnet_id       = aws_subnet.public_a.id

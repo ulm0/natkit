@@ -31,6 +31,13 @@ With the AWS CLI, `describe-images --include-deprecated`.
 
 Without the module, launch an instance from the new AMI in place of the old one; with an Auto Scaling group of your own, put the new AMI in its launch template and start an instance refresh.
 
+## To v0.1.9
+
+Nothing changes in natkit itself: the module, natkit-init and the settings are those of v0.1.8. What changes is where the AMIs come from: v0.1.9 and later are published from account `846227790340`, and releases up to v0.1.8 came from `208689161537`, which is being retired. With the module, moving to v0.1.9's AMI replaces the instance once, as any new AMI does.
+
+- Look the AMI up with the new owner: `owners = ["846227790340"]` in an `aws_ami` data source, `--owners 846227790340` in the CLI (see [Get the AMI](/docs/start/getting-started/#get-the-ami)). A lookup that still names `208689161537` finds v0.1.8 and older, never v0.1.9.
+- v0.1.8's AMIs stay where they are for now; a published release's AMIs are not deregistered, but the old account is going away, so move to v0.1.9.
+
 ## To v0.1.8
 
 From v0.1.7, with the module, moving to v0.1.8's AMI replaces the instance once, as any new AMI does. Nothing else changes unless you set the new input.

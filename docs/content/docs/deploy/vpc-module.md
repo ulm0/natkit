@@ -13,7 +13,7 @@ The community [VPC module](https://registry.terraform.io/modules/terraform-aws-m
 | `subnet_id` | one of `public_subnets` |
 | `route_table_ids` | `private_route_table_ids` |
 
-This is `examples/vpc` in the repository, which CI checks against the module. Outside the repository, `source` is `github.com/ulm0/natkit//tofu/nat?ref=v0.1.8`, and the AMI is natkit's [public one](/docs/start/getting-started/#get-the-ami) in us-east-1, or the one you imported elsewhere (`owners = ["self"]`).
+This is `examples/vpc` in the repository, which CI checks against the module. Outside the repository, `source` is `github.com/ulm0/natkit//tofu/nat?ref=v0.1.9`, and the AMI is natkit's [public one](/docs/start/getting-started/#get-the-ami) in us-east-1, or the one you imported elsewhere (`owners = ["self"]`).
 
 The VPC module also takes over the VPC's default security group and leaves it without rules (`manage_default_security_group`): an instance launched with it can't send anything, through the NAT or otherwise. Give your instances a security group that allows their outbound traffic.
 
@@ -52,12 +52,12 @@ data "aws_ami" "natkit" {
   owners = ["846227790340"]
   filter {
     name   = "name"
-    values = ["natkit-v0.1.8-arm64"]
+    values = ["natkit-v0.1.9-arm64"]
   }
 }
 
 module "nat" {
-  source = "../../tofu/nat" # outside this repository: "github.com/ulm0/natkit//tofu/nat?ref=v0.1.8"
+  source = "../../tofu/nat" # outside this repository: "github.com/ulm0/natkit//tofu/nat?ref=v0.1.9"
 
   vpc_id          = module.vpc.vpc_id
   subnet_id       = module.vpc.public_subnets[0]
@@ -78,7 +78,7 @@ The VPC module makes one private route table per private subnet, in the order of
 
 ```hcl
 module "nat" {
-  source   = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.8"
+  source   = "github.com/ulm0/natkit//tofu/nat?ref=v0.1.9"
   for_each = { for i, az in module.vpc.azs : az => i }
 
   name            = "natkit-${each.key}"
