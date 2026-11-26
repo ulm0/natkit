@@ -124,6 +124,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
     status = "Enabled"
 
     filter {}
+    # the delete marker that expiring an import/ object leaves, once no version is left behind it
+    expiration {
+      expired_object_delete_marker = true
+    }
     noncurrent_version_expiration {
       noncurrent_days           = 30
       newer_noncurrent_versions = 5
