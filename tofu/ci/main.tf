@@ -29,8 +29,9 @@ variable "github_subjects" {
   description = "OIDC subjects allowed to assume the CI role: the natkit repo's main branch and release tags, e.g. [\"repo:<owner>/natkit:ref:refs/heads/main\", \"repo:<owner>/natkit:ref:refs/tags/v*\"] (or GitHub's immutable form, repo:<owner>@<owner id>/natkit@<repo id>:...). Not repo:...:*: any branch that can run a workflow could then take the role."
   type        = list(string)
   validation {
-    condition     = alltrue([for s in var.github_subjects : !endswith(s, ":*")])
-    error_message = "Name the refs (…:ref:refs/heads/main, …:ref:refs/tags/v*), not every ref of the repo (…:*)."
+    # one owner and one repo (no wildcard in them), a branch by its whole name, a tag by its name or by a prefix ending in * (refs/tags/v*)
+    condition     = alltrue([for s in var.github_subjects : can(regex("^repo:[^:*?]+/[^:*?]+:ref:refs/(heads/[^*?]+|tags/[^*?]+\\*?)$", s))])
+    error_message = "Each subject is repo:<owner>/<repo>:ref:refs/heads/<branch> or …:ref:refs/tags/<tag> (or <prefix>*, e.g. refs/tags/v*): no wildcard (* or ?) in the owner, the repo or a branch, and not every ref of the repo (…:*)."
   }
 }
 variable "oidc_provider_arn" {
