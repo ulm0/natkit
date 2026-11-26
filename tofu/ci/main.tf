@@ -30,8 +30,8 @@ variable "github_subjects" {
   type        = list(string)
   validation {
     # one owner and one repo (no wildcard in them), a branch by its whole name, a tag by its name or by a prefix ending in * (refs/tags/v*)
-    condition     = alltrue([for s in var.github_subjects : can(regex("^repo:[^:*]+/[^:*]+:ref:refs/(heads/[^*]+|tags/[^*]+\\*?)$", s))])
-    error_message = "Each subject is repo:<owner>/<repo>:ref:refs/heads/<branch> or …:ref:refs/tags/<tag> (or <prefix>*, e.g. refs/tags/v*): no wildcard in the owner, the repo or a branch, and not every ref of the repo (…:*)."
+    condition     = alltrue([for s in var.github_subjects : can(regex("^repo:[^:*?]+/[^:*?]+:ref:refs/(heads/[^*?]+|tags/[^*?]+\\*?)$", s))])
+    error_message = "Each subject is repo:<owner>/<repo>:ref:refs/heads/<branch> or …:ref:refs/tags/<tag> (or <prefix>*, e.g. refs/tags/v*): no wildcard (* or ?) in the owner, the repo or a branch, and not every ref of the repo (…:*)."
   }
 }
 variable "oidc_provider_arn" {
