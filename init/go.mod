@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.76.0
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.350.0
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.84.0
-	github.com/aws/smithy-go v1.28.10
+	github.com/aws/smithy-go v1.28.11
 	go.yaml.in/yaml/v4 v4.0.0
 	golang.org/x/sys v0.50.0
 )
